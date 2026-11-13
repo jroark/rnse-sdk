@@ -51,6 +51,29 @@ Variants: `V220` and `V222` are the 192 (Europe, North America), `V574`,
 `V575` and `VB48` the 193.  Use the one your unit has; its loader's
 header names the project the boot ROM expects.
 
+## Debugging
+
+`--gdb PORT` makes `rnse loader` (or `boot`) wait for GDB instead of
+running:
+
+    rnse loader keys.iso --variant V574 --gdb 3333 &
+    gdb-multiarch sdk/out/keys-193.elf -ex 'target remote :3333'
+    (gdb) break panel_poll
+    (gdb) continue
+    (gdb) bt
+    (gdb) monitor screenshot now.png
+
+The SDK builds with debug information, so breakpoints, stepping,
+backtraces and variables work at source level; any GDB that knows the
+SH-4 will do (`gdb-multiarch` on Debian and Ubuntu).  The machine runs
+only while GDB lets it; Ctrl-C stops it.  Memory GDB can read is RAM and
+flash; device registers are not shown, because reading them has
+effects.  `monitor time` prints the emulated time, `monitor console`
+what the program has sent to its debug port, `monitor screenshot FILE`
+writes the picture.  After `detach` the emulator waits for the next
+connection with the machine as it was; `kill` ends the run.  There are
+no watchpoints yet (GDB then steps instead, slowly).
+
 ## What a program gets
 
 `sdk/include/rnse.h`.  In short: `board_init()` brings the board up and
