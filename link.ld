@@ -7,6 +7,7 @@
 ENTRY(_start)
 SECTIONS
 {
+    _load = LOAD;
     . = LOAD + 0x80;
     .text : { KEEP(*(.entry)) *(.text*) . = ALIGN(0x1000); KEEP(*(.vectors)) }
     .rodata : { *(.rodata*) }

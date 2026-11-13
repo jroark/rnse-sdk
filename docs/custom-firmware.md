@@ -47,6 +47,48 @@ others) is also possible, with `rnse repack`, but then the program must
 survive the update procedure and a mistake leaves a unit that does not
 start.  Start here.
 
+## The way back
+
+The installed software starts the program at *every* start for as long
+as the disc is in the drive, and it does so before it would react to
+the eject key (tried in the emulator: the key is ignored in those first
+seconds).  The disc sits behind the motorised display, which the
+program does not move.  So a program that just runs is a trap: the unit
+is not damaged, but it is the program's until the disc is out, and the
+disc does not come out.
+
+What ends that is the stock loader, because an update leaves the unit
+with the disc's software index, and then the disc is no update any
+more.  `rnse custom` therefore packs the stock loader it replaces into
+the image (twice, in separately checked blocks), and `stock_update()`
+in the SDK unpacks it, puts it where the program is and calls it with
+the arguments the program was started with.  The unit then does an
+ordinary update from the disc, restarts with its ordinary software and
+gives the disc back when asked.
+
+Things to know about it:
+
+* It installs the software *on the disc*.  Make the custom disc from
+  the update disc of the software the unit has or should have.  A disc
+  older than the unit's software would take the unit back to it.
+* Each round uses up an index: afterwards the unit has the custom
+  disc's index, and the next custom disc needs a higher one still.
+* It needs nothing but the processor and RAM until the stock loader
+  runs: no key, no command of the program's own to the drive.
+  `sdk/examples/probe` does nothing but show a picture, count down a
+  minute and call it, and is the program to try first.
+* A program that hangs before it gets there is still a trap.  Keep the
+  call on a path that cannot be blocked: a timer, as in the probe.
+
+The emulator runs the whole circle, with the stock software at both
+ends (`rnse boot probe.iso --installed-index ...`, and the test
+`custom_program_hands_back_to_the_stock_loader`).  What it cannot show
+is the one thing the hand-over needs that it has no model of, the
+processor's caches; the code purges the data cache over the place,
+invalidates the instruction cache and copies through uncached
+addresses, as the SH-4's manual asks, but none of that changes anything
+in the emulator.
+
 ## Building and running
 
 You need an SH-4 GCC that can produce big-endian code without its
@@ -103,11 +145,14 @@ no watchpoints yet (GDB then steps instead, slowly).
 `sdk/include/rnse.h`.  In short: `board_init()` brings the board up and
 starts a 10 ms tick; then there is a clock (`millis`, `delay_ms`), text
 on the debug serial port, and a picture of 8 bits per pixel through a
-palette (`screen_pixel`, `screen_fill`, `screen_text`), and the keys and
+palette (`screen_pixel`, `screen_fill`, `screen_text`), the way back to
+the stock software (`stock_update`, above), and the keys and
 knobs of the faceplate (`panel_init`, `panel_poll`, `panel_key`,
 `panel_knob`), and the CD drive (`cd_init`, `cd_wait_ready`, `cd_read`,
 `cd_find` for a file in the root directory of the disc), and the car's
-CAN bus (`can_init`, `can_send`, `can_receive`).  Four examples: `sdk/examples/hello` draws a test picture and counts seconds;
+CAN bus (`can_init`, `can_send`, `can_receive`).  Five examples:
+`sdk/examples/probe` is the one for a first try on a unit (see "The way
+back"); `sdk/examples/hello` draws a test picture and counts seconds;
 `sdk/examples/keys` shows what the faceplate reports (`sdk/build.sh 193
 keys`, and `--key SETUP@1500 --knob 1:3@2500` on the `rnse loader`
 command line to press and turn); `sdk/examples/cd` reads the disc the
@@ -120,7 +165,8 @@ emulated bus every 300 ms, `--can-alone` takes every other node away).
 |---|---|---|
 | CPU | SH7750R | SH-4A core of an SH7770-family chip |
 | linked at | 0x8df00080 | 0x09b60080 |
-| room (code, data, stack) | 0x88000 bytes | 0x2d8000 bytes |
+| room (code, data, stack) | 0x20000 bytes | 0x100000 bytes |
+| above that, to the end of the stock loader's image | the stock loader, packed | the same |
 | picture | 400 x 235, through the Coral chip | 800 x 480, display unit plane 6 |
 | debug serial port | companion chip, channel 5 | on-chip SCIF at 0xffe40000 |
 | tick | TMU0, INTEVT 0x400, level 7 | the same, through INT2 |
@@ -176,6 +222,17 @@ Things found on the way that a program has to know:
   pixel N of an 8-bit surface is the byte at address N XOR 3.
 * The faceplate controller is held in reset until the program releases
   it, and says nothing until then.
+* The installed software leaves DMA channels armed (for the SD card
+  processors and the drive on the 192) that go on writing to memory;
+  the stock loader switches every channel off first thing, and so does
+  the SDK.
+* The memory the loader is copied to is not all the loader's.  The
+  North American 192 software has variables of its operating system at
+  0x8df710f0 to 0x8df71108, 0x710f0 into the loader's place, and
+  changes them until the loader has masked interrupts; the stock loader
+  has part of a picture there.  Keep code and data low in the place (the
+  SDK's are within the first 0x20000 bytes), and expect such things of
+  software versions nobody has looked at.
 * The stock loader never sets the direction of the ports it drives, so
   the boot ROM has done so before it starts.  A program in the loader's
   place inherits that, like the rest of the boot ROM's set-up (memory
@@ -285,18 +342,35 @@ Not established:
   processor, GPS: no stock loader touches them, and the SDK has no code
   for them yet.
 
-If you do try it on a unit: make the disc with an index higher than
-the unit's (second and third digit), from the update disc for exactly
-that kind of unit, and keep the unmodified update disc at hand.  The
-program writes nothing to flash and the stock software writes nothing
-about the update there before it starts the loader, so the unit's
-software stays as it was; the two bytes it writes to battery-backed
-memory are the same after any stock update.  Expected outcomes, then:
-the picture; or nothing, with the unit carrying on as usual because it
-did not take the disc for an update; or a restart when the watchdog
-expires because the program started and failed.  As long as the disc is
-in the drive the unit will start the program again at every start;
-take it out to have the unit back.  The debug serial port is a header inside
+If you do try it on a unit, try the probe first:
+
+    sdk/build.sh 192 probe              # or 193
+    rnse info disc.iso                  # the disc's index for your variant
+    rnse custom disc.iso V220 sdk/out/probe-192.bin probe.iso --index 0660
+    rnse boot probe.iso --variant V220 --ignition --installed-index 0650 \
+        --cycles 40000000000 --shot 30000:probe.png   # the whole circle, emulated
+
+with the update disc for exactly that kind of unit, of the software the
+unit has (or newer), and an index higher than the unit's in its second
+and third digit.  Keep the unmodified update disc at hand.  What should
+happen: some time after the disc goes in (the installed software first
+adds up every module on it), the probe's picture with a count-down from
+60, then the stock update's own screens, then the unit as it was, with
+the disc's index.  Other outcomes:
+
+* nothing, and the unit carries on as usual: it did not take the disc
+  for an update (index not higher, wrong variant, or a check the
+  emulator does not know about).  The disc comes out as usual;
+* the unit restarts again and again without a picture: the program was
+  started and failed, and the watchdog resets the unit each time.  This
+  is the trap described above.  The program writes nothing to flash
+  and the installed software records nothing about the update before it
+  starts the loader, so the software in the unit is intact, but getting
+  the disc out may take opening the unit;
+* the picture, but no update after the count-down: the same trap, with
+  the hand-over as the part that failed.
+
+The debug serial port is a header inside
 the unit; its location and bit rate are not known.  What would help
 most is a report of what the screen shows, and, from an opened unit,
 the markings of the chips.

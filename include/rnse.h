@@ -125,6 +125,24 @@ u32 can_lost(void);
 int can_take(u16 *id, u8 *data);
 void can_interrupt(void);
 
+/* The way back to an ordinary unit.  The installed software starts a
+ * program in the loader's place whenever the disc in the drive has a
+ * higher software index than the unit, that is at every start until
+ * the unit has been updated from that disc.  stock_update does that: it
+ * starts the stock loader, which `rnse custom` has packed into the
+ * image, exactly as the installed software would have, and the unit
+ * updates itself from the disc and restarts as after any update.  It
+ * returns only when it cannot do it: -1 the image carries no stock
+ * loader, -2 a part of it is damaged in both of its copies. */
+int stock_loader_carried(void);
+int stock_update(void);
+/* What the program was started with: the screen language (0..8) and
+ * two values the stock loader gets as well. */
+extern u32 start_args[3];
+/* From the hardware layer: 4 MB of RAM (and 64 KB below it) that
+ * neither the program nor the stock loader has in use. */
+extern const u32 way_back_scratch;
+
 /* Called from the vector code for anything but the tick. */
 void unexpected(u32 expevt, u32 intevt, u32 spc);
 

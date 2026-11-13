@@ -9,15 +9,19 @@ unit=${1:?unit: 192 or 193}
 example=${2:-hello}
 : "${CROSS:=sh4-linux-gnu-}"
 case $unit in
-    # Load address and size of the stock loader's image.
-    192) load=0x8df00000 size=0x88000 ;;
-    193) load=0x09b60000 size=0x2d8000 ;;
+    # Load address of the stock loader, and how much memory from there
+    # on the program may use for code, data and stack.  The stock
+    # loaders are longer (0x88800 bytes and more on the 192, 0x2da368
+    # and more on the 193); the rest of the image is where `rnse custom`
+    # puts the stock loader, packed and twice over, for the way back.
+    192) load=0x8df00000 size=0x20000 ;;
+    193) load=0x09b60000 size=0x100000 ;;
     *) echo "unit must be 192 or 193" >&2; exit 1 ;;
 esac
 mkdir -p out
 cflags="-g -mb -m4-nofpu -Os -ffreestanding -fno-builtin -fno-pic -fno-stack-protector -Wall -Wextra -Iinclude"
 objs=""
-for src in src/crt0.S src/common.c src/panel.c src/cd.c src/can.c src/hw$unit.c examples/$example/*.c; do
+for src in src/crt0.S src/common.c src/panel.c src/cd.c src/can.c src/wayback.c src/hw$unit.c examples/$example/*.c; do
     obj=out/$unit-$(basename "$src" | sed 's/\.[cS]$/.o/')
     ${CROSS}gcc $cflags -c -o "$obj" "$src"
     objs="$objs $obj"

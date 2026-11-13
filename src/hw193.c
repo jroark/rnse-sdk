@@ -49,6 +49,9 @@
 #define LEFT 16
 #define TOP 8
 
+/* For the way back (wayback.c): RAM starts at 0x08000000; the stock loader lives from 0x09b60000 to below 0x0a000000, the picture is at 0x08110000. */
+const u32 way_back_scratch = 0x0a800000;
+
 const int screen_width = 800, screen_height = 480;
 
 static volatile u32 ticks;

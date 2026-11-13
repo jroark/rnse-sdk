@@ -23,6 +23,10 @@
 #define TCNT0 0xffd8000c
 #define TCR0 0xffd80010
 
+/* On-chip DMA controller: SAR, DAR, DMATCR, CHCR for channels 0-3 from
+ * +0x00 and for 4-7 from +0x50; DMAOR at +0x40. */
+#define DMAC 0xffa00000
+
 /* Companion chip, through the uncached window. */
 #define COMPANION_INTC 0xa7b00000
 #define UART5 0xa7a50000 /* debug serial port */
@@ -38,6 +42,9 @@
 #define VRAM 0xb8000000
 #define SURFACE 0x00110000 /* offset in video memory, as the loader's */
 #define STRIDE 448
+
+/* For the way back (wayback.c): RAM starts at 0x8c000000; the stock loader lives from 0x8dd00000 up. */
+const u32 way_back_scratch = 0x8c400000;
 
 const int screen_width = 400, screen_height = 235;
 
@@ -272,6 +279,14 @@ void board_init(void)
     for (i = 0; i <= 0x14; i += 2)
         REG16(COMPANION_INTC + i) = 0;
     REG16(COMPANION_INTC + 0x1e) = 0x0040;
+
+    /* DMA: every channel off, then the controller's mode as the loader
+     * has it.  The installed software leaves channels armed (the SD
+     * card processors', the drive's) that would go on writing into
+     * memory while this program runs. */
+    for (i = 0; i < 8; i++)
+        REG32(DMAC + 0x0c + (i < 4 ? i : i + 1) * 0x10) = 0;
+    REG32(DMAC + 0x40) = 0x0000c001;
 
     /* Debug serial port: mode, bit rate, FIFO control, transmitter on. */
     REG16(UART5 + 0x00) = 0x0001;
