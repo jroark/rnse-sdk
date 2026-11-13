@@ -67,7 +67,7 @@ palette (`screen_pixel`, `screen_fill`, `screen_text`).  The example,
 | picture | 400 x 235, through the Coral chip | 800 x 480, display unit plane 6 |
 | debug serial port | companion chip, channel 5 | on-chip SCIF at 0xffe40000 |
 | tick | TMU0, INTEVT 0x400, level 7 | the same, through INT2 |
-| watchdog strobe | port 3 bit 0, toggled by the tick | 0xffc44008 bit 0, toggled by the tick |
+| watchdog strobe | port 0 bit 0 (0x12300001), toggled by the tick | 0xffc44008 bit 0, toggled by the tick |
 
 The program keeps to the memory the stock loader's image occupies.  It
 uses no service of the boot ROM.
@@ -102,23 +102,36 @@ interrupt controllers, the display hardware and so on.  Those models
 were built from the behaviour of the stock software; they are right
 where that software exercises them and unknown elsewhere.
 
-`--strict` lists, when the run ends, every address the program used
-that no model answers for:
+`--strict` does two things.  It starts the machine with arbitrary data
+in RAM instead of zeroes, as after power-up (the stock software boots
+either way; a program that forgets to clear what it uses will not).
+And it lists, when the run ends, every address the program used that no
+model answers for:
 
-    strict: the software used hardware the emulator has no model of (30 addresses).
+    strict: the software used hardware the emulator has no model of (16 addresses).
             What is written there is stored and read back; real hardware may differ.
-            fe00802c: 0 reads, 1 writes, first at pc 09b60548
+            fe00802c: 0 reads, 1 writes, first at pc 09b60564
             ...
 
-For the example that list is the set-up writes copied from the loader
-(interrupt pins, ports, the serial port's format and clock registers).
-Anything else that shows up there in a program of yours is something
-the emulator cannot tell you about.
+For the example on the 193 that list is the set-up writes copied from
+the loader whose meaning is unknown (pin functions, clock control); on
+the 192 it is a single latch.  Anything else that shows up there in a
+program of yours is something the emulator cannot tell you about.  The
+stock software's own list is a measure of what is left to do: 15
+addresses on the 192, some 110 on the 193 in the first 20 seconds.
 
-It also enforces a few things real hardware does: an address error for
-a misaligned access, the 193's external watchdog (a program that stops
-toggling the strobe for 1.5 s is reset; the real limit is not known),
-interrupts only when unmasked in the controller.
+The emulator also enforces a few things real hardware does whether or
+not `--strict` is given:
+
+* an address error for a misaligned access, the illegal-instruction
+  exceptions (also for branches in delay slots);
+* the external watchdog of both units: once a program has started
+  toggling the strobe, 1.5 s without an edge resets the unit (the real
+  limit is not known);
+* interrupts only when unmasked in the controllers, with the stock
+  priorities;
+* the 193's debug serial port transmits only when its transmitter has
+  been enabled.
 
 ## What this does and does not establish
 
