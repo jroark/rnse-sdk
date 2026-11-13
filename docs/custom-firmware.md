@@ -7,17 +7,40 @@ small hardware layer for each generation of the unit, and an example.
 Read the section "What this does and does not establish" before
 taking a disc to a car.  Nothing here has been run on real hardware.
 
-## Where the program runs
+## Where the program runs, and what starts it
 
 In the place of the update loader.  An update disc carries, for each
-kind of unit, a loader (`LDM`) that the unit's boot ROM copies from the
-disc into RAM and starts; the loader then does the update.  A program
-of your own in that place
+kind of unit, a loader (`LDM`).  When the unit's installed software
+finds such a disc in the drive, and the disc's software index is higher
+than its own, it checks the disc, copies the loader into RAM and calls
+it; the loader then does the update.  (`docs/boot-rom.md`, "Starting
+the loader", has the steps.)  A program of your own in that place
 
-* is started by the boot ROM itself, with none of the unit's software
-  underneath it;
+* is started by the unit's own software, after the same checks a stock
+  loader passes, and from then on has the machine to itself;
 * runs from RAM and writes nothing to the flash unless it chooses to,
   so the unit's own software is still there when the disc comes out.
+
+All of that can be watched in the emulator, with the stock software
+doing the starting:
+
+    rnse custom disc.iso V574 sdk/out/hello-193.bin hello.iso --index 0230
+    rnse boot hello.iso --variant V574 --ignition --installed-index 0220 \
+        --cycles 8000000000 --screenshot hello.png
+
+The index is what makes the disc an update.  The installed software
+compares the second and third digits of the disc's four with its own
+and wants the disc's higher: a unit with 0650 takes 0660, not 0651.
+`rnse info` shows a disc's index for each variant; a unit's own is the
+`SOFIDX` of the update it last took (presumably the software number its
+version display shows, which has not been checked).  The same disc with an index that is not higher is
+ignored and the unit starts as always.
+
+A program started this way finds the machine as the running operating
+system left it, not as after a reset: interrupts are open, timers run,
+the picture is the system's.  The SDK's start-up code masks interrupts
+with its first instructions and sets everything it uses itself, as the
+stock loaders do.
 
 Replacing the installed software itself (the `OSM` module and the
 others) is also possible, with `rnse repack`, but then the program must
@@ -35,14 +58,15 @@ libraries; Debian's and Ubuntu's `gcc-sh4-linux-gnu` will do.
 
 `rnse custom` takes an image of an update disc you own and writes a
 copy in which the loader of one variant is your program.  The loader is
-on the disc twice (inside `LOADING.KWI`, and as a file of its own that
-the boot ROM reads); both are replaced.  The module's header is the
+on the disc twice (inside `LOADING.KWI`, where the installed software
+takes it from, and as a file of its own); both are replaced.  The module's header is the
 stock loader's with a new checksum, and the image keeps the stock
 loader's length, so the file differs from one the boot ROM is known to
 accept in its contents only.
 
-`rnse loader` starts the program as the emulated boot ROM starts the
-loader.  What the program sends to the debug serial port is printed;
+`rnse loader` starts the program directly, without the installed
+software: quicker, and the way to use `--strict` and `--gdb` from the
+first instruction.  What the program sends to the debug serial port is printed;
 `--screenshot`, `--shot`, `--io-log` and the other options work as for
 the stock software, and `rnse ui hello.iso --variant V574 --loader`
 shows it in the browser front end.
@@ -211,18 +235,24 @@ not `--strict` is given:
 
 ## What this does and does not establish
 
-Established, by the tests in `tests/disc.rs`: the example builds, is
-accepted by the same checks the stock modules pass (header, checksum),
-starts in the emulator the way the stock loader does, and behaves as
-written on both units.
+Established, by the tests in `tests/disc.rs`: the examples build and
+behave as written on both emulated units; and the stock software of
+both units, European and North American, running in the emulator,
+takes a disc made by `rnse custom` with a higher index for an update,
+passes it through its checks (project code, checksums of every module
+on the disc) and starts the program, which then runs correctly from the
+state that software leaves and writes nothing to flash.
 
 Not established:
 
-* **That a real boot ROM starts it.**  The boot ROM is not on the update
-  disc and has not been read out; the emulator's is a stand-in.  How it
-  chooses the loader file, what it checks beyond the header (it might
-  compare versions with what is installed, as the loader does), and
-  what state it leaves are inferred from the stock loaders.
+* **That a real unit gets as far as the emulated one.**  The decision
+  to start the loader is the stock software's own code, running
+  unmodified, so that part is as good as the emulation of what it needs
+  on the way: the drive, the interrupt and DMA controllers, the boot
+  ROM services.  A real unit may differ in ways this never touched; it
+  might, say, need the ignition on or a particular screen.  And what
+  the stock software has put in the unit's battery-backed memory over
+  the years is not what the emulator starts with.
 * **That the bring-up is sufficient.**  It is the stock loader's, minus
   the parts the example has no use for (the drive, CAN, DMA).  If the
   picture needs one of those, or needs the loader's exact timing, the
@@ -252,9 +282,18 @@ Not established:
   processor, GPS: no stock loader touches them, and the SDK has no code
   for them yet.
 
-If you do try it on a unit: the program writes nothing to flash, so the
-worst expected outcome is that nothing happens or the unit restarts
-when the watchdog expires.  The debug serial port is a header inside
+If you do try it on a unit: make the disc with an index higher than
+the unit's (second and third digit), from the update disc for exactly
+that kind of unit, and keep the unmodified update disc at hand.  The
+program writes nothing to flash and the stock software writes nothing
+about the update there before it starts the loader, so the unit's
+software stays as it was; the two bytes it writes to battery-backed
+memory are the same after any stock update.  Expected outcomes, then:
+the picture; or nothing, with the unit carrying on as usual because it
+did not take the disc for an update; or a restart when the watchdog
+expires because the program started and failed.  As long as the disc is
+in the drive the unit will start the program again at every start;
+take it out to have the unit back.  The debug serial port is a header inside
 the unit; its location and bit rate are not known.  What would help
 most is a report of what the screen shows, and, from an opened unit,
 the markings of the chips.
