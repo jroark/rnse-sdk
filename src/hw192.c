@@ -28,7 +28,7 @@
 #define UART5 0xa7a50000 /* debug serial port */
 
 /* Ports. */
-#define PORT3_DATA 0xb2300001 /* bit 0: watchdog strobe */
+#define PORT0_DATA 0xb2300001 /* bit 0: watchdog strobe */
 #define PORT8_DATA 0xb2800001
 #define LATCHES 0xb2d00000
 
@@ -51,7 +51,7 @@ void interrupt(void)
         REG16(TCR0) &= (u16)~0x0100;
         ticks += 10;
         /* The watchdog wants an edge on its strobe regularly. */
-        REG8(PORT3_DATA) ^= 1;
+        REG8(PORT0_DATA) ^= 1;
     } else {
         unexpected(0, code, 0);
     }
@@ -84,6 +84,56 @@ void screen_pixel(int x, int y, u8 colour)
      * surface is the byte at address N ^ 3. */
     REG8(VRAM + SURFACE + ((y * STRIDE + x) ^ 3)) = colour;
 }
+
+/* The faceplate controller: serial channel 3 of the companion chip, and
+ * its reset line on bit 0 of the latch at 0xb6000004 (low = reset).
+ * The values and their order are the stock operating system's; the
+ * loader does not use the faceplate. */
+#define UART3 0xa7a30000
+#define LATCH16 0xb6000004
+
+void panel_port_init(void)
+{
+    REG16(UART3 + 0x04) = 0;                           /* port off */
+    REG32(LATCH16) &= ~1u;                             /* controller in reset */
+    REG16(UART3 + 0x08) = REG16(UART3 + 0x08) & 0xffc7; /* error flags */
+    REG16(UART3 + 0x00) = 0x0011;                      /* format */
+    REG16(UART3 + 0x02) = 0x005f;                      /* bit rate */
+    REG16(UART3 + 0x0c) = 0x8080;                      /* both FIFOs emptied */
+    delay_ms(20);
+    REG32(LATCH16) |= 1;
+    REG16(UART3 + 0x04) = 0x0030; /* transmitter and receiver on */
+}
+
+int panel_getc(void)
+{
+    u16 status = REG16(UART3 + 0x08);
+    if (status & 0x0038) /* receive errors */
+        REG16(UART3 + 0x08) = status & 0xffc7;
+    if (!(status & 0x0040))
+        return -1;
+    return REG16(UART3 + 0x0a) & 0xff;
+}
+
+void panel_putc(u8 c)
+{
+    while (REG16(UART3 + 0x08) & 0x0200)
+        ;
+    REG16(UART3 + 0x06) = c;
+}
+
+/* What the stock software sends once the controller has started, and
+ * the last of the frames with which it fades the lighting in. */
+const u8 panel_settings[] = {
+    0x02, 10, 0x40, 0x1d, 0x4b, 0x42, 0x40, 0x40, 0x40, 0x01, 0xff, 0x05,
+    0x03, 13, 0x3c, 0x0a, 0x02, 0x0a, 0x04, 0x0a, 0x04, 0x0a, 0x04, 0x0a, 0x04, 0x0a, 0x0a,
+    0x0a, 5,  0x00, 0xff, 0x1c, 0xff, 0x1c,
+    0x09, 4,  0x00, 0x00, 0x0f, 0x06,
+    0x06, 12, 0x00, 0x00, 0x00, 0x00, 0x30, 0x70, 0x00, 0x00, 0x09, 0xb0, 0x00, 0x00,
+    0x07, 4,  0x00, 0x00, 0x00, 0x03,
+    0x06, 12, 0x0f, 0x8a, 0x07, 0x98, 0x09, 0x98, 0x00, 0x00, 0x02, 0x18, 0x26, 0xd8,
+    0, 0
+};
 
 void board_init(void)
 {
@@ -123,7 +173,7 @@ void board_init(void)
     REG32(CORAL_HOST + 0xfffc) = 0x41d7f053;
     REG8(CORAL_HOST + 0x07) = 0x02;
     REG8(CORAL_HOST + 0x27) = 0x1f;
-    REG8(PORT3_DATA) = 0x01;
+    REG8(PORT0_DATA) = 0x01;
     REG32(0xb6000004) = 0x00000010;
     REG8(CORAL_HOST + 0x2f) = 0x01;
     /* Display timing: 400 of 508 pixels a line, 235 of 263 lines. */
@@ -150,7 +200,7 @@ void board_init(void)
     REG16(CORAL_DISP + 0xc0) = 0x8000;
     REG16(CORAL_DISP + 0xba) = 0x8000;
     REG8(CORAL_HOST + 0x27) = 0x13;
-    REG8(PORT3_DATA) = 0x00;
+    REG8(PORT0_DATA) = 0x00;
 
     /* A black picture, then the layer that shows it: 8 bits per pixel,
      * 448 bytes a line, at SURFACE in video memory. */

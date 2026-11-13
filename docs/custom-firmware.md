@@ -56,8 +56,12 @@ header names the project the boot ROM expects.
 `sdk/include/rnse.h`.  In short: `board_init()` brings the board up and
 starts a 10 ms tick; then there is a clock (`millis`, `delay_ms`), text
 on the debug serial port, and a picture of 8 bits per pixel through a
-palette (`screen_pixel`, `screen_fill`, `screen_text`).  The example,
-`sdk/examples/hello`, is forty lines.
+palette (`screen_pixel`, `screen_fill`, `screen_text`), and the keys and
+knobs of the faceplate (`panel_init`, `panel_poll`, `panel_key`,
+`panel_knob`).  Two examples: `sdk/examples/hello` draws a test picture
+and counts seconds; `sdk/examples/keys` shows what the faceplate
+reports (`sdk/build.sh 193 keys`, and `--key SETUP@1500 --knob 1:3@2500`
+on the `rnse loader` command line to press and turn).
 
 | | 192 | 193 |
 |---|---|---|
@@ -67,6 +71,7 @@ palette (`screen_pixel`, `screen_fill`, `screen_text`).  The example,
 | picture | 400 x 235, through the Coral chip | 800 x 480, display unit plane 6 |
 | debug serial port | companion chip, channel 5 | on-chip SCIF at 0xffe40000 |
 | tick | TMU0, INTEVT 0x400, level 7 | the same, through INT2 |
+| faceplate | serial channel 3, reset on latch 0x16000004 bit 0 | SCIF at 0xff926000, reset on port 0xff909004 bit 1 |
 | watchdog strobe | port 0 bit 0 (0x12300001), toggled by the tick | 0xffc44008 bit 0, toggled by the tick |
 
 The program keeps to the memory the stock loader's image occupies.  It
@@ -86,10 +91,19 @@ loader running in the emulator.  Writes whose purpose is unknown are
 repeated all the same and marked as such in the comments, because a
 real unit may need them even though the emulator does not.
 
-Two things found on the way that a program has to know:
+The faceplate is the exception, because no loader uses it: its port
+set-up, the release of its controller's reset line and the settings
+sent to the controller are the stock operating system's instead.  Among
+those settings are six 12-bit levels (command 0x06) that the operating
+system ramps while it fades the lighting in; the SDK sends the final
+values, since a unit that never gets them may well stay dark.
+
+Things found on the way that a program has to know:
 
 * On the 192 the graphics chip is little-endian on a big-endian bus:
   pixel N of an 8-bit surface is the byte at address N XOR 3.
+* The faceplate controller is held in reset until the program releases
+  it, and says nothing until then.
 * The stock loader never sets the direction of the ports it drives, so
   the boot ROM has done so before it starts.  A program in the loader's
   place inherits that, like the rest of the boot ROM's set-up (memory
@@ -154,9 +168,17 @@ Not established:
 * **Timing.**  The emulated CPU executes one instruction per clock
   cycle at an estimated clock; the watchdog's real period, the display's
   real requirements and the serial port's real bit rate are unknown.
-* **Everything the stock loader does not use.**  Sound, the faceplate
-  in loader mode, the radio processor, GPS: no stock loader touches
-  them, so there is nothing to copy the set-up from yet.
+* **The faceplate in the loader's place.**  The link's set-up is the
+  operating system's, but the operating system runs after the boot ROM
+  has started every module; whether the pins of that serial port and
+  the reset line are already switched to those functions when a loader
+  runs is not known.  The emulated controller is a stand-in that knows
+  the frames the stock software exchanges with it; how long the real
+  one takes to start, and whether it insists on every setting, is not
+  known either.
+* **Everything else the stock loader does not use.**  Sound, the radio
+  processor, GPS: no stock loader touches them, and the SDK has no code
+  for them yet.
 
 If you do try it on a unit: the program writes nothing to flash, so the
 worst expected outcome is that nothing happens or the unit restarts

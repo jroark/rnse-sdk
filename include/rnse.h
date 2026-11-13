@@ -44,6 +44,37 @@ void screen_fill(int x, int y, int w, int h, u8 colour);
  * digits and a little punctuation. */
 void screen_text(int x, int y, const char *s, u8 colour, int scale);
 
+/* The faceplate: keys and the two knobs sit behind a controller of
+ * their own on a serial line.  panel_init releases the controller from
+ * reset; panel_poll, to be called every 10 ms or so, answers it, sends
+ * it the settings the stock software sends (among them six levels that
+ * look like the lighting's) and keeps the state below up to date. */
+void panel_init(void);
+void panel_poll(void);
+/* The controller has started and taken its settings. */
+int panel_online(void);
+/* Is this key down?  KEY_* below. */
+int panel_key(int key);
+/* Detents turned since the last call, clockwise positive. */
+int panel_knob(int knob);
+
+enum {
+    KEY_INFO = 1, KEY_NAV = 2, KEY_TEL = 3, KEY_NAME = 5, KEY_MEDIA = 6, KEY_RADIO = 7,
+    KEY_SOFT_TL = 9, KEY_SOFT_TR = 10, KEY_RETURN = 11, KEY_DISPLAY = 13, KEY_SETUP = 14, KEY_CAR = 15,
+    KEY_NEXT = 19, KEY_PREV = 21, KEY_SOFT_BR = 22, KEY_SOFT_BL = 23,
+    KEY_CD_EJECT = 31, KEY_SELECT = 44
+};
+enum { KNOB_VOLUME = 0, KNOB_SELECT = 1 };
+
+/* What the hardware layer provides to the faceplate code: the serial
+ * port (panel_getc returns -1 when nothing has arrived) and the frames
+ * to send after the controller has started, each as command, length of
+ * the data, data; a zero length ends the list. */
+void panel_port_init(void);
+int panel_getc(void);
+void panel_putc(u8 c);
+extern const u8 panel_settings[];
+
 /* Called from the vector code for anything but the tick. */
 void unexpected(u32 expevt, u32 intevt, u32 spc);
 

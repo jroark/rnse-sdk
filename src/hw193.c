@@ -98,6 +98,70 @@ void screen_pixel(int x, int y, u8 colour)
     REG8((SURFACE | 0xa0000000) + (TOP + y) * STRIDE + LEFT + x) = colour;
 }
 
+/* The faceplate controller: a serial port with FIFO at 0xff926000, and
+ * its reset line on bit 1 of the port at 0xff909004 (low = reset).
+ * The values and their order are the stock operating system's; the
+ * loader does not use the faceplate.  (The operating system sets no
+ * pin functions for this port: either the boot ROM has, or there are
+ * none to set.) */
+#define SCIF_FP 0xff926000
+#define PORT_FP 0xff909000
+
+void panel_port_init(void)
+{
+    REG16(SCIF_FP + 0x08) = 0;      /* port off */
+    REG32(PORT_FP + 4) = 0;         /* controller in reset */
+    REG32(PORT_FP + 0) = 0;
+    REG32(PORT_FP + 0) = 0xc0000000;
+    REG32(PORT_FP + 4) = 1;
+    REG16(SCIF_FP + 0x18) = 0;
+    REG16(SCIF_FP + 0x18) = 0x0006; /* both FIFOs held empty */
+    REG16(SCIF_FP + 0x10) = REG16(SCIF_FP + 0x10) & 0x0060;
+    REG16(SCIF_FP + 0x24) = 0;
+    REG16(SCIF_FP + 0x00) = 0x0020; /* format: 8 bits, even parity */
+    REG8(SCIF_FP + 0x04) = 0xa1;    /* bit rate */
+    delay_ms(20);
+    REG32(PORT_FP + 4) |= 2;
+    REG16(SCIF_FP + 0x18) = 0;
+    REG16(SCIF_FP + 0x08) = 0x0030; /* transmitter and receiver on */
+}
+
+int panel_getc(void)
+{
+    u16 status = REG16(SCIF_FP + 0x10);
+    if (status & 0x0003) {
+        int c = REG8(SCIF_FP + 0x14);
+        /* Flags are cleared by writing zeroes to them after reading. */
+        REG16(SCIF_FP + 0x10) = status & (u16)~0x0093;
+        return c;
+    }
+    if (status & 0x0090) /* error, break */
+        REG16(SCIF_FP + 0x10) = status & (u16)~0x0090;
+    return -1;
+}
+
+void panel_putc(u8 c)
+{
+    /* Bit 5: room in the transmit FIFO. */
+    while (!(REG16(SCIF_FP + 0x10) & 0x0020))
+        ;
+    REG8(SCIF_FP + 0x0c) = c;
+    REG16(SCIF_FP + 0x10) = REG16(SCIF_FP + 0x10) & (u16)~0x0060;
+}
+
+/* What the stock software sends once the controller has started, and
+ * the last of the frames with which it fades the lighting in. */
+const u8 panel_settings[] = {
+    0x02, 10, 0x40, 0x1d, 0x4b, 0x42, 0x40, 0x00, 0x40, 0x01, 0xff, 0x05,
+    0x03, 13, 0x3c, 0x0a, 0x02, 0x0a, 0x04, 0x0a, 0x04, 0x0a, 0x04, 0x0a, 0x04, 0x0a, 0x0a,
+    0x0a, 5,  0x00, 0xff, 0x1c, 0xff, 0x1c,
+    0x09, 4,  0x00, 0x00, 0x0f, 0x06,
+    0x06, 12, 0x00, 0x00, 0x00, 0x00, 0x30, 0x70, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x07, 4,  0x00, 0x00, 0x00, 0x03,
+    0x06, 12, 0x0c, 0x80, 0x07, 0x98, 0x09, 0x98, 0x09, 0x0e, 0x02, 0x18, 0x26, 0xd8,
+    0, 0
+};
+
 void board_init(void)
 {
     int i;
