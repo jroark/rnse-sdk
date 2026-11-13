@@ -116,14 +116,19 @@ interrupt controllers, the display hardware and so on.  Those models
 were built from the behaviour of the stock software; they are right
 where that software exercises them and unknown elsewhere.
 
-`--strict` does three things.  It starts the machine with arbitrary
-data in RAM instead of zeroes, as after power-up (the stock software
-boots either way; a program that forgets to clear what it uses will
-not).  It lets the watchdog bite from the first moment, not only once
-the program has begun to strobe it, and says so when the strobe was
-ever left alone for longer than the stock software leaves it.  And it
-lists, when the run ends, every address the program used that no model
-answers for:
+`--strict` makes the emulator less forgiving in four ways.  It starts
+the machine with arbitrary data in RAM instead of zeroes, as after
+power-up (the stock software boots either way; a program that forgets
+to clear what it uses will not).  It starts a program in the loader's
+place with the three timers running and their interrupts enabled and
+open in the interrupt controller: both stock loaders begin by stopping
+every timer and clearing the controller, which they would hardly do if
+the boot ROM left those alone, and a program that enables interrupts
+without doing the same gets interrupts it has no handler for.  It lets
+the watchdog bite from the first moment, not only once the program has
+begun to strobe it, and says so when the strobe was ever left alone for
+longer than the stock software leaves it.  And it lists, when the run
+ends, every address the program used that no model answers for:
 
     strict: the software used hardware the emulator has no model of (16 addresses).
             What is written there is stored and read back; real hardware may differ.
