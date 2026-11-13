@@ -5,10 +5,13 @@
  * has to work for that but the processor and its memory: no key, no
  * drive command of this program's, no picture.
  *
- * WAIT seconds are shown; change it to taste. */
+ * WAIT seconds are shown (EXTRA_CFLAGS=-DWAIT=10 sdk/build.sh ... for
+ * another number). */
 #include "rnse.h"
 
+#ifndef WAIT
 #define WAIT 60
+#endif
 
 static void number(int x, int y, u32 v, int scale, u8 colour)
 {

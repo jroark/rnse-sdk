@@ -82,12 +82,13 @@ Things to know about it:
 
 The emulator runs the whole circle, with the stock software at both
 ends (`rnse boot probe.iso --installed-index ...`, and the test
-`custom_program_hands_back_to_the_stock_loader`).  What it cannot show
-is the one thing the hand-over needs that it has no model of, the
-processor's caches; the code purges the data cache over the place,
-invalidates the instruction cache and copies through uncached
-addresses, as the SH-4's manual asks, but none of that changes anything
-in the emulator.
+`custom_program_hands_back_to_the_stock_loader`), and with the
+processor's caches modelled (`--strict`, and always in that test).  The
+hand-over replaces running code, which is where caches bite: the stub
+purges the data cache over the place, invalidates the instruction cache
+and copies through uncached addresses.  Take the invalidation out and
+the 192 fails in the emulator as it would on the bench, executing what
+is left of the program from the instruction cache.
 
 ## Building and running
 
@@ -222,6 +223,11 @@ Things found on the way that a program has to know:
   pixel N of an 8-bit surface is the byte at address N XOR 3.
 * The faceplate controller is held in reset until the program releases
   it, and says nothing until then.
+* On the 193 a program in the loader's place runs at addresses in P0,
+  where stores stay in the data cache; on the 192 it runs in P1, where
+  they are written through.  Anything a device is to read from RAM
+  (the 193's display surface, a DMA buffer) is written through the
+  uncached P2 address of the same memory, or written back with `ocbwb`.
 * The installed software leaves DMA channels armed (for the SD card
   processors and the drive on the 192) that go on writing to memory;
   the stock loader switches every channel off first thing, and so does
@@ -245,7 +251,18 @@ interrupt controllers, the display hardware and so on.  Those models
 were built from the behaviour of the stock software; they are right
 where that software exercises them and unknown elsewhere.
 
-`--strict` makes the emulator less forgiving in four ways.  It starts
+`--strict` makes the emulator less forgiving in five ways.  It models
+the processor's instruction and data caches, with the cache control
+register as the stock operating system of both units sets it
+(0x80008181: both on, stores through P1 written through, stores through
+the other areas kept in the cache until the line is written back).
+Code that is written and then run without the instruction cache being
+invalidated runs as the old code; data that is only in the cache is not
+what a device or an access through P2 sees; both are reported when the
+run ends.  (The organisation is simplified, direct-mapped where the
+real caches have two or four ways, so which line is in the cache at a
+given moment is not exactly as on the chip: see `src/sh4/cache.rs`.)
+It starts
 the machine with arbitrary data in RAM instead of zeroes, as after
 power-up (the stock software boots either way; a program that forgets
 to clear what it uses will not).  It starts a program in the loader's
@@ -332,6 +349,10 @@ Not established:
   wants to be asked for its sense data is exercised (the test swaps the
   disc before the program's first command); waiting for a drive that is
   busy or spinning up is not.
+* **The caches exactly.**  The cache model has the rules right and the
+  organisation simplified.  A program that breaks a rule can get away
+  with it here and not on the chip, or the other way round, depending
+  on which lines happen to be in the cache.
 * **CAN on a real bus.**  The emulated bus delivers whole frames, one
   after the other with the time each takes at 100 kbit/s, and
   acknowledges at once.  Bit timing is copied, not checked; error

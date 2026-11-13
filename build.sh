@@ -19,7 +19,8 @@ case $unit in
     *) echo "unit must be 192 or 193" >&2; exit 1 ;;
 esac
 mkdir -p out
-cflags="-g -mb -m4-nofpu -Os -ffreestanding -fno-builtin -fno-pic -fno-stack-protector -Wall -Wextra -Iinclude"
+# EXTRA_CFLAGS: for instance -DWAIT=5 for the probe.
+cflags="-g -mb -m4-nofpu -Os -ffreestanding -fno-builtin -fno-pic -fno-stack-protector -Wall -Wextra -Iinclude $EXTRA_CFLAGS"
 objs=""
 for src in src/crt0.S src/common.c src/panel.c src/cd.c src/can.c src/wayback.c src/hw$unit.c examples/$example/*.c; do
     obj=out/$unit-$(basename "$src" | sed 's/\.[cS]$/.o/')
