@@ -116,11 +116,14 @@ interrupt controllers, the display hardware and so on.  Those models
 were built from the behaviour of the stock software; they are right
 where that software exercises them and unknown elsewhere.
 
-`--strict` does two things.  It starts the machine with arbitrary data
-in RAM instead of zeroes, as after power-up (the stock software boots
-either way; a program that forgets to clear what it uses will not).
-And it lists, when the run ends, every address the program used that no
-model answers for:
+`--strict` does three things.  It starts the machine with arbitrary
+data in RAM instead of zeroes, as after power-up (the stock software
+boots either way; a program that forgets to clear what it uses will
+not).  It lets the watchdog bite from the first moment, not only once
+the program has begun to strobe it, and says so when the strobe was
+ever left alone for longer than the stock software leaves it.  And it
+lists, when the run ends, every address the program used that no model
+answers for:
 
     strict: the software used hardware the emulator has no model of (16 addresses).
             What is written there is stored and read back; real hardware may differ.
@@ -140,12 +143,16 @@ not `--strict` is given:
 * an address error for a misaligned access, the illegal-instruction
   exceptions (also for branches in delay slots);
 * the external watchdog of both units: once a program has started
-  toggling the strobe, 1.5 s without an edge resets the unit (the real
-  limit is not known);
+  toggling the strobe, 1.5 s without an edge resets the unit.  The real
+  limit is not known.  What is known is what the stock software does:
+  an edge every 20 ms from its tick, and never more than about 220 ms
+  between two (192) or 150 ms (193), from the first instruction on.  A
+  program that keeps to that is as safe as the stock software;
 * interrupts only when unmasked in the controllers, with the stock
   priorities;
-* the 193's debug serial port transmits only when its transmitter has
-  been enabled.
+* serial ports send only with the transmitter on and hear only with the
+  receiver on and the FIFO out of reset; the faceplate controller is
+  silent until its reset line is released.
 
 ## What this does and does not establish
 
