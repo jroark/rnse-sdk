@@ -1,0 +1,54 @@
+/* Bare-metal support for programs that run on an RNS-E in the place of
+ * the update loader: loaded into RAM from a CD by the unit's boot ROM,
+ * with nothing of the unit's own software underneath.
+ *
+ * The same source builds for both generations of the unit; what differs
+ * is in src/hw192.c and src/hw193.c.  Everything a program may assume
+ * about the hardware is what the stock loader has been seen to do, in
+ * the order it does it; see docs/custom-firmware.md. */
+#ifndef RNSE_H
+#define RNSE_H
+
+typedef unsigned char u8;
+typedef unsigned short u16;
+typedef unsigned int u32;
+typedef signed int s32;
+
+#define REG8(a) (*(volatile u8 *)(a))
+#define REG16(a) (*(volatile u16 *)(a))
+#define REG32(a) (*(volatile u32 *)(a))
+
+/* Board bring-up: interrupt controller, timers, debug serial port,
+ * display, and a 10 ms tick that also serves the watchdog.  Called once,
+ * with interrupts masked; returns with them enabled. */
+void board_init(void);
+
+/* Milliseconds since board_init, in steps of 10. */
+u32 millis(void);
+void delay_ms(u32 ms);
+/* Stop the CPU until the next interrupt (the tick, at the latest). */
+void cpu_idle(void);
+
+/* Debug serial port (a header inside the unit). */
+void console_putc(char c);
+void console_puts(const char *s);
+void console_hex(u32 v);
+void console_dec(u32 v);
+
+/* The picture: 8 bits per pixel through a palette of 256 colours. */
+extern const int screen_width, screen_height;
+void screen_palette(int index, u8 r, u8 g, u8 b);
+void screen_pixel(int x, int y, u8 colour);
+void screen_fill(int x, int y, int w, int h, u8 colour);
+/* Text in a 5x7 font, each dot `scale` pixels square.  Upper case,
+ * digits and a little punctuation. */
+void screen_text(int x, int y, const char *s, u8 colour, int scale);
+
+/* Called from the vector code for anything but the tick. */
+void unexpected(u32 expevt, u32 intevt, u32 spc);
+
+/* Division without the compiler's library. */
+u32 udiv(u32 a, u32 b);
+u32 umod(u32 a, u32 b);
+
+#endif
