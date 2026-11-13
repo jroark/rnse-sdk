@@ -55,7 +55,8 @@ void panel_poll(void);
 int panel_online(void);
 /* Is this key down?  KEY_* below. */
 int panel_key(int key);
-/* Detents turned since the last call, clockwise positive. */
+/* Detents turned since the last call: positive is clockwise for the
+ * select knob and "louder" for the volume knob. */
 int panel_knob(int knob);
 
 enum {

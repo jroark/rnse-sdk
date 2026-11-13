@@ -5,7 +5,8 @@
  * answered with the single byte 0x15.  The controller announces itself
  * with command 0x0f after its reset line is released, reports the keys
  * with 0x0c (six bytes, a bit a key) and the knobs with 0x0d (four
- * bytes: volume, -, select, -; bit 7 clockwise, the rest a count).
+ * bytes: volume, -, select, -; bits 6..0 a count, bit 7 the direction:
+ * clockwise for the select knob, "quieter" for the volume knob).
  * src/dev/panel.rs in the emulator has the rest of what is known. */
 #include "rnse.h"
 
@@ -74,7 +75,7 @@ static void frame(void)
         break;
     case 0x0d:
         if (n >= 3) {
-            knobs[KNOB_VOLUME] += d[0] & 0x80 ? (d[0] & 0x7f) : -(d[0] & 0x7f);
+            knobs[KNOB_VOLUME] += d[0] & 0x80 ? -(d[0] & 0x7f) : (d[0] & 0x7f);
             knobs[KNOB_SELECT] += d[2] & 0x80 ? (d[2] & 0x7f) : -(d[2] & 0x7f);
         }
         break;
