@@ -106,14 +106,24 @@ void cd_data_write(u16 w);
 
 /* CAN: the car's infotainment bus, 100 kbit/s, identifiers of 11 bits.
  * can_init sets the controller up as the stock loader does, with one
- * mailbox that receives everything and one to send from. */
+ * mailbox that receives everything and one to send from.  Frames are
+ * taken out of the controller by interrupt and kept, up to 31 of them,
+ * until can_receive asks; can_lost counts those there was no room for
+ * or that the controller itself had to drop. */
 void can_init(void);
 /* 0 = sent and acknowledged by another node; -1 = not within 100 ms
  * (nobody else on the bus, or the bus is down), and given up. */
 int can_send(u16 id, const u8 *data, int len);
-/* The length of a frame that has arrived (0..8), its identifier and
- * data stored; -1 when there is none.  One frame is held: call often. */
+/* The length of the oldest frame waiting (0..8), its identifier and
+ * data stored; -1 when there is none. */
 int can_receive(u16 *id, u8 *data);
+u32 can_lost(void);
+
+/* Between the hardware layer and the CAN code: can_take reads a frame
+ * out of the receive mailbox (-1: none, -2: one or more were lost, call
+ * again), can_interrupt is to be called for the controller's interrupt. */
+int can_take(u16 *id, u8 *data);
+void can_interrupt(void);
 
 /* Called from the vector code for anything but the tick. */
 void unexpected(u32 expevt, u32 intevt, u32 spc);

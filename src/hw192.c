@@ -52,6 +52,9 @@ void interrupt(void)
         ticks += 10;
         /* The watchdog wants an edge on its strobe regularly. */
         REG8(PORT0_DATA) ^= 1;
+    } else if (code == 0x340) {
+        /* Level 5: the CAN controller. */
+        can_interrupt();
     } else {
         unexpected(0, code, 0);
     }
@@ -202,8 +205,15 @@ void can_init(void)
     REG16(CAN + 0x90) = 0;
     REG16(CAN + 0x92) = 0;
     REG16(CAN + 0x94) = 0;
-    REG16(CAN + 0x0a) = 0xfebd;       /* interrupt mask, as the loader */
+    /* Interrupts: the loader's mask is 0xfebd, which lets the end of a
+     * transmission through as well; this code waits for that itself and
+     * takes the interrupt for received frames only, from mailbox 0, at
+     * the level the loader gives the controller. */
+    REG16(CAN + 0x0a) = 0xfffd;
+    REG16(CAN + 0x50) = 0xffff;
+    REG16(CAN + 0x52) = 0xfffe;
     REG16(CAN_MB(1) + 0x04) = 0x2000; /* sends */
+    REG16(COMPANION_INTC + 0x12) = 0x0500;
 }
 
 int can_send(u16 id, const u8 *data, int len)
@@ -227,9 +237,14 @@ int can_send(u16 id, const u8 *data, int len)
     return 0;
 }
 
-int can_receive(u16 *id, u8 *data)
+int can_take(u16 *id, u8 *data)
 {
     int len, i;
+    if (REG16(CAN + 0x5a) & 0x0001) {
+        /* A frame arrived on top of an unread one. */
+        REG16(CAN + 0x5a) = 0x0001;
+        return -2;
+    }
     if (!(REG16(CAN + 0x42) & 0x0001))
         return -1;
     *id = (u16)(REG16(CAN_MB(0)) >> 4 & 0x7ff);
@@ -239,7 +254,6 @@ int can_receive(u16 *id, u8 *data)
     for (i = 0; i < len; i++)
         data[i] = REG8(CAN_MB(0) + 0x08 + i);
     REG16(CAN + 0x42) = 0x0001; /* read: flag taken back */
-    REG16(CAN + 0x5a) = 0x0001; /* and the one for a frame lost */
     return len;
 }
 

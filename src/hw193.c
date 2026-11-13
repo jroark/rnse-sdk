@@ -65,6 +65,8 @@ void interrupt(void)
          * loader toggles it from this tick as well. */
         strobe ^= 1;
         REG32(WATCHDOG) = strobe;
+    } else if (code == 0x880) {
+        can_interrupt();
     } else {
         unexpected(0, code, 0);
     }
@@ -237,7 +239,10 @@ void can_init(void)
     int n;
     REG16(CAN + 0x00) = 0x0001; /* reset */
     REG16(CAN + 0x08) = 0x0001;
-    REG16(CAN + 0x0a) = 0xfebd; /* interrupt mask, as the loader */
+    /* Interrupts: the loader's mask is 0xfebd, which lets the end of a
+     * transmission through as well; this code waits for that itself and
+     * takes the interrupt for received frames only. */
+    REG16(CAN + 0x0a) = 0xfffd;
     for (n = 0; n < 32; n++) {
         REG32(CAN_MB(n) + 0x00) = 0;
         REG32(CAN_MB(n) + 0x08) = 0;
@@ -251,6 +256,11 @@ void can_init(void)
     REG16(CAN + 0x06) = 0x000b;            /* bit timing */
     REG16(CAN + 0x04) = 0xb730;
     REG16(CAN + 0x00) = 0x0000; /* run */
+    REG16(CAN + 0x50) = (u16)~(1 << (CAN_RX - 16)); /* that mailbox's interrupt */
+    REG16(CAN + 0x52) = 0xffff;
+    /* Level and mask in the interrupt controller as the loader has them. */
+    REG32(INT2PRI0 + 0x14) = 0x000a0000;
+    REG32(INT2MSKCR) = 0x02000000;
 }
 
 int can_send(u16 id, const u8 *data, int len)
@@ -273,10 +283,15 @@ int can_send(u16 id, const u8 *data, int len)
     return 0;
 }
 
-int can_receive(u16 *id, u8 *data)
+int can_take(u16 *id, u8 *data)
 {
     int len, i;
     /* Mailboxes 31..16 have their flags in the first word of a pair. */
+    if (REG16(CAN + 0x58) & (1 << (CAN_RX - 16))) {
+        /* A frame arrived while one was unread, and was dropped. */
+        REG16(CAN + 0x58) = (u16)(1 << (CAN_RX - 16));
+        return -2;
+    }
     if (!(REG16(CAN + 0x40) & (1 << (CAN_RX - 16))))
         return -1;
     *id = (u16)(REG16(CAN_MB(CAN_RX)) >> 2 & 0x7ff);
@@ -286,7 +301,6 @@ int can_receive(u16 *id, u8 *data)
     for (i = 0; i < len; i++)
         data[i] = REG8(CAN_MB(CAN_RX) + 0x08 + i);
     REG16(CAN + 0x40) = (u16)(1 << (CAN_RX - 16)); /* read: flag taken back */
-    REG16(CAN + 0x58) = (u16)(1 << (CAN_RX - 16)); /* and the one for a frame lost */
     return len;
 }
 

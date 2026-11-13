@@ -164,9 +164,11 @@ beyond what the stock software is seen to do there, if only in length.
 
 The CAN code is each stock loader's set-up, bit timing included (100
 kbit/s), with one mailbox receiving everything where the loaders
-receive a few identifiers, and without interrupts.  The 192's loader
-does not reset the controller before it sets it up, so neither does the
-SDK there: the boot ROM has left it running.
+receive a few identifiers.  Received frames are taken by interrupt, at
+the level and through the mask the loaders use, into a queue; sending
+waits for the acknowledgement by polling.  The 192's loader does not
+reset the controller before it sets it up, so neither does the SDK
+there: whoever ran before has left it running.
 
 Things found on the way that a program has to know:
 
@@ -273,7 +275,8 @@ Not established:
   wants to be asked for its sense data is exercised (the test swaps the
   disc before the program's first command); waiting for a drive that is
   busy or spinning up is not.
-* **CAN on a real bus.**  The emulated bus delivers whole frames and
+* **CAN on a real bus.**  The emulated bus delivers whole frames, one
+  after the other with the time each takes at 100 kbit/s, and
   acknowledges at once.  Bit timing is copied, not checked; error
   states (error passive, bus off) are not modelled.  A unit that is to
   stay awake in a car also has to take part in the bus's network
