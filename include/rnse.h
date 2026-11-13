@@ -104,6 +104,17 @@ u8 cd_alt_status(void);
 u16 cd_data_read(void);
 void cd_data_write(u16 w);
 
+/* CAN: the car's infotainment bus, 100 kbit/s, identifiers of 11 bits.
+ * can_init sets the controller up as the stock loader does, with one
+ * mailbox that receives everything and one to send from. */
+void can_init(void);
+/* 0 = sent and acknowledged by another node; -1 = not within 100 ms
+ * (nobody else on the bus, or the bus is down), and given up. */
+int can_send(u16 id, const u8 *data, int len);
+/* The length of a frame that has arrived (0..8), its identifier and
+ * data stored; -1 when there is none.  One frame is held: call often. */
+int can_receive(u16 *id, u8 *data);
+
 /* Called from the vector code for anything but the tick. */
 void unexpected(u32 expevt, u32 intevt, u32 spc);
 

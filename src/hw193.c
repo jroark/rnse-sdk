@@ -222,6 +222,74 @@ void cd_data_write(u16 w)
     REG32(ATAPI) = (u32)(w >> 8) | (u32)(w & 0xff) << 8;
 }
 
+/* The chip's CAN controller: the registers of the 192's, with another
+ * mailbox layout (identifier << 2 at +0, acceptance mask at +4, data
+ * from +8, control with the length at +0x10).  The set-up is the stock
+ * loader's: reset, mailboxes, bit timing (21 quanta a bit, prescaler
+ * 12: 100 kbit/s), run.  The loader receives in mailbox 24, so this
+ * does too. */
+#define CAN 0xffdf0000
+#define CAN_MB(n) (CAN + 0x100 + 0x20 * (n))
+#define CAN_RX 24
+
+void can_init(void)
+{
+    int n;
+    REG16(CAN + 0x00) = 0x0001; /* reset */
+    REG16(CAN + 0x08) = 0x0001;
+    REG16(CAN + 0x0a) = 0xfebd; /* interrupt mask, as the loader */
+    for (n = 0; n < 32; n++) {
+        REG32(CAN_MB(n) + 0x00) = 0;
+        REG32(CAN_MB(n) + 0x08) = 0;
+        REG32(CAN_MB(n) + 0x0c) = 0;
+        REG32(CAN_MB(n) + 0x10) = 0;
+        REG16(CAN_MB(n) + 0x10) = 0x0700; /* mailbox not in use */
+    }
+    REG16(CAN_MB(1) + 0x10) = 0x0000;      /* sends */
+    REG16(CAN_MB(CAN_RX) + 0x10) = 0x0300; /* receives */
+    REG16(CAN_MB(CAN_RX) + 0x04) = 0x1ffc; /* whatever the identifier */
+    REG16(CAN + 0x06) = 0x000b;            /* bit timing */
+    REG16(CAN + 0x04) = 0xb730;
+    REG16(CAN + 0x00) = 0x0000; /* run */
+}
+
+int can_send(u16 id, const u8 *data, int len)
+{
+    u32 start = millis();
+    int i;
+    REG16(CAN_MB(1) + 0x00) = (u16)(id << 2);
+    for (i = 0; i < len && i < 8; i++)
+        REG8(CAN_MB(1) + 0x08 + i) = data[i];
+    REG16(CAN_MB(1) + 0x10) = (u16)(len & 15);
+    REG32(CAN + 0x20) = 0x00000002; /* transmit request, mailbox 1 */
+    while (!(REG16(CAN + 0x32) & 0x0002)) {
+        if (millis() - start > 100) {
+            REG32(CAN + 0x28) = 0x00000002; /* cancel */
+            REG16(CAN + 0x3a) = 0x0002;
+            return -1;
+        }
+    }
+    REG16(CAN + 0x32) = 0x0002; /* acknowledged: flag taken back */
+    return 0;
+}
+
+int can_receive(u16 *id, u8 *data)
+{
+    int len, i;
+    /* Mailboxes 31..16 have their flags in the first word of a pair. */
+    if (!(REG16(CAN + 0x40) & (1 << (CAN_RX - 16))))
+        return -1;
+    *id = (u16)(REG16(CAN_MB(CAN_RX)) >> 2 & 0x7ff);
+    len = REG16(CAN_MB(CAN_RX) + 0x10) & 15;
+    if (len > 8)
+        len = 8;
+    for (i = 0; i < len; i++)
+        data[i] = REG8(CAN_MB(CAN_RX) + 0x08 + i);
+    REG16(CAN + 0x40) = (u16)(1 << (CAN_RX - 16)); /* read: flag taken back */
+    REG16(CAN + 0x58) = (u16)(1 << (CAN_RX - 16)); /* and the one for a frame lost */
+    return len;
+}
+
 void board_init(void)
 {
     int i;

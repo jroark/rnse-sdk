@@ -82,12 +82,15 @@ on the debug serial port, and a picture of 8 bits per pixel through a
 palette (`screen_pixel`, `screen_fill`, `screen_text`), and the keys and
 knobs of the faceplate (`panel_init`, `panel_poll`, `panel_key`,
 `panel_knob`), and the CD drive (`cd_init`, `cd_wait_ready`, `cd_read`,
-`cd_find` for a file in the root directory of the disc).  Three
-examples: `sdk/examples/hello` draws a test picture and counts seconds;
+`cd_find` for a file in the root directory of the disc), and the car's
+CAN bus (`can_init`, `can_send`, `can_receive`).  Four examples: `sdk/examples/hello` draws a test picture and counts seconds;
 `sdk/examples/keys` shows what the faceplate reports (`sdk/build.sh 193
 keys`, and `--key SETUP@1500 --knob 1:3@2500` on the `rnse loader`
 command line to press and turn); `sdk/examples/cd` reads the disc the
-program came on.
+program came on; `sdk/examples/can` lists the frames on the bus and
+sends the one with which the stock software reports itself (`--can
+351:4500000000000000@300` on the command line puts a frame on the
+emulated bus every 300 ms, `--can-alone` takes every other node away).
 
 | | 192 | 193 |
 |---|---|---|
@@ -99,6 +102,7 @@ program came on.
 | tick | TMU0, INTEVT 0x400, level 7 | the same, through INT2 |
 | faceplate | serial channel 3, reset on latch 0x16000004 bit 0 | SCIF at 0xff926000, reset on port 0xff909004 bit 1 |
 | CD drive | ATA registers at 0x07800001 + 2n, data at 0x07880000 | chip's ATAPI interface at 0xffc62100 |
+| CAN | HCAN2 at 0x07c00000 | on-chip controller at 0xffdf0000, other mailbox layout |
 | watchdog strobe | port 0 bit 0 (0x12300001), toggled by the tick | 0xffc44008 bit 0, toggled by the tick |
 
 The program keeps to the memory the stock loader's image occupies.  It
@@ -133,6 +137,12 @@ controller and waits for interrupts; programmed I/O through the same
 data register is what the stock operating system does for the short
 answers to other commands, so reading whole sectors that way goes
 beyond what the stock software is seen to do there, if only in length.
+
+The CAN code is each stock loader's set-up, bit timing included (100
+kbit/s), with one mailbox receiving everything where the loaders
+receive a few identifiers, and without interrupts.  The 192's loader
+does not reset the controller before it sets it up, so neither does the
+SDK there: the boot ROM has left it running.
 
 Things found on the way that a program has to know:
 
@@ -191,6 +201,10 @@ not `--strict` is given:
   program that keeps to that is as safe as the stock software;
 * interrupts only when unmasked in the controllers, with the stock
   priorities;
+* the CAN controller sends and receives only out of its reset and halt
+  states; `--strict` says when frames went out with other bit timing
+  than the stock software's, and `--can-alone` leaves every frame
+  unacknowledged, as on a bench;
 * serial ports send only with the transmitter on and hear only with the
   receiver on and the FIFO out of reset; the faceplate controller is
   silent until its reset line is released.
@@ -229,6 +243,11 @@ Not established:
   wants to be asked for its sense data is exercised (the test swaps the
   disc before the program's first command); waiting for a drive that is
   busy or spinning up is not.
+* **CAN on a real bus.**  The emulated bus delivers whole frames and
+  acknowledges at once.  Bit timing is copied, not checked; error
+  states (error passive, bus off) are not modelled.  A unit that is to
+  stay awake in a car also has to take part in the bus's network
+  management, which the SDK does not do.
 * **Everything else the stock loader does not use.**  Sound, the radio
   processor, GPS: no stock loader touches them, and the SDK has no code
   for them yet.

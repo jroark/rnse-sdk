@@ -176,6 +176,73 @@ void cd_data_write(u16 w)
     REG16(ATA_DATA) = w;
 }
 
+/* The CAN controller (an HCAN2): 16-bit registers, thirty-two
+ * mailboxes of 0x20 bytes from +0x100 (identifier << 4 at +0, control
+ * with the length at +4, data from +8, acceptance mask at +0x10).  The
+ * set-up is the stock loader's: it does not reset the controller, which
+ * the boot ROM has left running, and its bit timing (21 quanta a bit,
+ * prescaler 14) is 100 kbit/s. */
+#define CAN 0xa7c00000
+#define CAN_MB(n) (CAN + 0x100 + 0x20 * (n))
+
+void can_init(void)
+{
+    int n, i;
+    REG16(CAN + 0x00) = 0x0000; /* run */
+    for (n = 0; n < 32; n++) {
+        for (i = 0; i < 0x14; i++)
+            REG8(CAN_MB(n) + i) = 0;
+        REG16(CAN_MB(n) + 0x04) = 0x0700; /* mailbox not in use */
+    }
+    REG16(CAN_MB(0) + 0x04) = 0x2300; /* receives, new over unread */
+    REG16(CAN_MB(0) + 0x10) = 0x7ff0; /* whatever the identifier */
+    REG16(CAN + 0x06) = 0x000d;       /* bit timing */
+    REG16(CAN + 0x04) = 0xf300;
+    REG16(CAN + 0x08) = 0x0001; /* reset flag taken back */
+    REG16(CAN + 0x90) = 0;
+    REG16(CAN + 0x92) = 0;
+    REG16(CAN + 0x94) = 0;
+    REG16(CAN + 0x0a) = 0xfebd;       /* interrupt mask, as the loader */
+    REG16(CAN_MB(1) + 0x04) = 0x2000; /* sends */
+}
+
+int can_send(u16 id, const u8 *data, int len)
+{
+    u32 start = millis();
+    int i;
+    REG16(CAN_MB(1) + 0x00) = (u16)(id << 4);
+    REG16(CAN_MB(1) + 0x02) = 0;
+    for (i = 0; i < len && i < 8; i++)
+        REG8(CAN_MB(1) + 0x08 + i) = data[i];
+    REG16(CAN_MB(1) + 0x04) = (u16)(0x2000 | (len & 15));
+    REG16(CAN + 0x22) = 0x0002; /* transmit request, mailbox 1 */
+    while (!(REG16(CAN + 0x32) & 0x0002)) {
+        if (millis() - start > 100) {
+            REG16(CAN + 0x2a) = 0x0002; /* cancel */
+            REG16(CAN + 0x3a) = 0x0002;
+            return -1;
+        }
+    }
+    REG16(CAN + 0x32) = 0x0002; /* acknowledged: flag taken back */
+    return 0;
+}
+
+int can_receive(u16 *id, u8 *data)
+{
+    int len, i;
+    if (!(REG16(CAN + 0x42) & 0x0001))
+        return -1;
+    *id = (u16)(REG16(CAN_MB(0)) >> 4 & 0x7ff);
+    len = REG16(CAN_MB(0) + 0x04) & 15;
+    if (len > 8)
+        len = 8;
+    for (i = 0; i < len; i++)
+        data[i] = REG8(CAN_MB(0) + 0x08 + i);
+    REG16(CAN + 0x42) = 0x0001; /* read: flag taken back */
+    REG16(CAN + 0x5a) = 0x0001; /* and the one for a frame lost */
+    return len;
+}
+
 void board_init(void)
 {
     int i;
