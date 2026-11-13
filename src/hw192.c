@@ -135,6 +135,47 @@ const u8 panel_settings[] = {
     0, 0
 };
 
+/* The CD/DVD drive: ATA registers at odd addresses two apart, the data
+ * register at a second address (where the DMA controller takes disc
+ * data from in the stock software, and where the stock operating
+ * system reads short answers word by word), alternate status and
+ * device control in a third block.  The first byte of each pair is the
+ * upper half of a data word.  The stock loader moves disc data by DMA
+ * and waits for the drive's interrupt; this code polls. */
+#define ATA_REG(n) (0xa7800001 + 2 * (n))
+#define ATA_DATA 0xa7880000
+#define ATA_CONTROL 0xa790000d
+
+void cd_port_init(void)
+{
+    REG8(ATA_CONTROL) = 0x08; /* as the loader: no reset, interrupt line driven */
+}
+
+u8 cd_reg_read(int reg)
+{
+    return REG8(ATA_REG(reg));
+}
+
+void cd_reg_write(int reg, u8 v)
+{
+    REG8(ATA_REG(reg)) = v;
+}
+
+u8 cd_alt_status(void)
+{
+    return REG8(ATA_CONTROL);
+}
+
+u16 cd_data_read(void)
+{
+    return REG16(ATA_DATA);
+}
+
+void cd_data_write(u16 w)
+{
+    REG16(ATA_DATA) = w;
+}
+
 void board_init(void)
 {
     int i;

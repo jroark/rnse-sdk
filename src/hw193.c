@@ -162,6 +162,66 @@ const u8 panel_settings[] = {
     0, 0
 };
 
+/* The CD/DVD drive on the chip's ATAPI interface: the ATA registers one
+ * to a 32-bit word, alternate status and device control at +0x38, the
+ * interface's own registers from +0x80.  Data words carry the first
+ * byte of each pair in the lower half.  Set-up values and their order
+ * are the stock loader's, which also works by programmed I/O; the one
+ * thing left out is its enabling of the drive's interrupt (+0x88),
+ * since this code polls. */
+#define ATAPI 0xffc62100
+
+void cd_port_init(void)
+{
+    REG32(ATAPI + 0xa4) |= 0x00000001;
+    REG32(ATAPI + 0xc0) = 0x00140014; /* four timing registers */
+    REG32(ATAPI + 0xc4) = 0x0c060c06;
+    REG32(ATAPI + 0xc8) = 0x140c140c;
+    REG32(ATAPI + 0xcc) = 0x06110611;
+    REG32(ATAPI + 0x80) |= 0x00000060; /* interface control */
+    REG32(ATAPI + 0xbc) = 0x00000001;
+    REG32(ATAPI + 0x84) = 0;           /* status flags cleared */
+    REG32(ATAPI + 0x18) = 0xa0;        /* drive 0 */
+    while (REG32(ATAPI + 0x38) & 0x80)
+        ;
+    REG32(ATAPI + 0x38) = 0x08; /* device control: no reset */
+    /* SET FEATURES: transfer mode, PIO 4. */
+    REG32(ATAPI + 0x18) = 0xa0;
+    REG32(ATAPI + 0x04) = 0x03;
+    REG32(ATAPI + 0x08) = 0x0c;
+    REG32(ATAPI + 0x1c) = 0xef;
+    REG32(ATAPI + 0x38);
+    while (REG32(ATAPI + 0x38) & 0x80)
+        ;
+    REG32(ATAPI + 0x1c); /* status read: takes the drive's interrupt back */
+}
+
+u8 cd_reg_read(int reg)
+{
+    return (u8)REG32(ATAPI + 4 * reg);
+}
+
+void cd_reg_write(int reg, u8 v)
+{
+    REG32(ATAPI + 4 * reg) = v;
+}
+
+u8 cd_alt_status(void)
+{
+    return (u8)REG32(ATAPI + 0x38);
+}
+
+u16 cd_data_read(void)
+{
+    u32 w = REG32(ATAPI);
+    return (u16)((w & 0xff) << 8 | (w >> 8 & 0xff));
+}
+
+void cd_data_write(u16 w)
+{
+    REG32(ATAPI) = (u32)(w >> 8) | (u32)(w & 0xff) << 8;
+}
+
 void board_init(void)
 {
     int i;

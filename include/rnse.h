@@ -75,6 +75,35 @@ int panel_getc(void);
 void panel_putc(u8 c);
 extern const u8 panel_settings[];
 
+/* The CD/DVD drive: an ATAPI device, used here by programmed I/O and
+ * without interrupts.  Results: 0 = done; -1 = the drive did not react
+ * in time; above 0 = the drive refused, and the value is 0x100 plus its
+ * error register (the sense key in bits 7..4: 2 not ready, 6 the disc
+ * has changed, ...). */
+int cd_init(void);
+/* An ATAPI command of twelve bytes whose answer, if any, goes to buf
+ * (at most len bytes are kept). */
+int cd_command(const u8 *command, void *buf, u32 len);
+/* Waits until a disc can be read, for at most the given time. */
+int cd_wait_ready(u32 ms);
+/* Sectors of 2048 bytes. */
+int cd_read(u32 sector, u32 count, void *buf);
+/* A file in the root directory of an ISO 9660 disc, by its name in
+ * upper case without the version (";1").  0 = found. */
+int cd_find(const char *name, u32 *sector, u32 *size);
+
+/* What the hardware layer provides to the drive code: the task file
+ * (register 0..7 as in ATA: 1 error/features, 2 interrupt reason, 4 and
+ * 5 byte count, 6 drive, 7 status/command), the alternate status, and
+ * the data register as words with the first byte of each pair in the
+ * upper half. */
+void cd_port_init(void);
+u8 cd_reg_read(int reg);
+void cd_reg_write(int reg, u8 v);
+u8 cd_alt_status(void);
+u16 cd_data_read(void);
+void cd_data_write(u16 w);
+
 /* Called from the vector code for anything but the tick. */
 void unexpected(u32 expevt, u32 intevt, u32 spc);
 

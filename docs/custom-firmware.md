@@ -58,10 +58,13 @@ starts a 10 ms tick; then there is a clock (`millis`, `delay_ms`), text
 on the debug serial port, and a picture of 8 bits per pixel through a
 palette (`screen_pixel`, `screen_fill`, `screen_text`), and the keys and
 knobs of the faceplate (`panel_init`, `panel_poll`, `panel_key`,
-`panel_knob`).  Two examples: `sdk/examples/hello` draws a test picture
-and counts seconds; `sdk/examples/keys` shows what the faceplate
-reports (`sdk/build.sh 193 keys`, and `--key SETUP@1500 --knob 1:3@2500`
-on the `rnse loader` command line to press and turn).
+`panel_knob`), and the CD drive (`cd_init`, `cd_wait_ready`, `cd_read`,
+`cd_find` for a file in the root directory of the disc).  Three
+examples: `sdk/examples/hello` draws a test picture and counts seconds;
+`sdk/examples/keys` shows what the faceplate reports (`sdk/build.sh 193
+keys`, and `--key SETUP@1500 --knob 1:3@2500` on the `rnse loader`
+command line to press and turn); `sdk/examples/cd` reads the disc the
+program came on.
 
 | | 192 | 193 |
 |---|---|---|
@@ -72,6 +75,7 @@ on the `rnse loader` command line to press and turn).
 | debug serial port | companion chip, channel 5 | on-chip SCIF at 0xffe40000 |
 | tick | TMU0, INTEVT 0x400, level 7 | the same, through INT2 |
 | faceplate | serial channel 3, reset on latch 0x16000004 bit 0 | SCIF at 0xff926000, reset on port 0xff909004 bit 1 |
+| CD drive | ATA registers at 0x07800001 + 2n, data at 0x07880000 | chip's ATAPI interface at 0xffc62100 |
 | watchdog strobe | port 0 bit 0 (0x12300001), toggled by the tick | 0xffc44008 bit 0, toggled by the tick |
 
 The program keeps to the memory the stock loader's image occupies.  It
@@ -97,6 +101,15 @@ sent to the controller are the stock operating system's instead.  Among
 those settings are six 12-bit levels (command 0x06) that the operating
 system ramps while it fades the lighting in; the SDK sends the final
 values, since a unit that never gets them may well stay dark.
+
+The drive code works by programmed I/O and polling on both units.  On
+the 193 that is how the stock loader reads the disc, and the set-up of
+the interface is the loader's, less its enabling of the drive's
+interrupt.  On the 192 the stock loader has disc data moved by the DMA
+controller and waits for interrupts; programmed I/O through the same
+data register is what the stock operating system does for the short
+answers to other commands, so reading whole sectors that way goes
+beyond what the stock software is seen to do there, if only in length.
 
 Things found on the way that a program has to know:
 
@@ -188,6 +201,11 @@ Not established:
   the frames the stock software exchanges with it; how long the real
   one takes to start, and whether it insists on every setting, is not
   known either.
+* **The drive's timing.**  The emulated drive answers at once and has
+  the disc spinning.  That a drive first reports a changed disc and
+  wants to be asked for its sense data is exercised (the test swaps the
+  disc before the program's first command); waiting for a drive that is
+  busy or spinning up is not.
 * **Everything else the stock loader does not use.**  Sound, the radio
   processor, GPS: no stock loader touches them, and the SDK has no code
   for them yet.
