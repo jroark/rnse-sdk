@@ -201,12 +201,14 @@ software and the boot ROM have left them (identification, clock
 ratios, bus set-up, timers, interrupt priorities, serial port
 settings; on the 193 only registers its stock software uses itself),
 and it reads the boot ROM, the one part of the unit's software that is
-on no disc.  Then it shows all of it and sends all of it:
+on no disc.  On a 192 it then asks the two processors of the card
+board about themselves (below).  Then it shows all of it and sends all
+of it:
 
 * on the screen, page after page, twelve lines of address and value to
-  a page, then the state it was started in (SR, VBR, where its caller
-  was, the stack pointer, the arguments) and check sums of the boot
-  ROM, the whole and each 4 KiB of it.  Photographs of the pages are a
+  a page, on a 192 a page for each card processor, then the state it
+  was started in (SR, VBR, where its caller was, the stack pointer, the
+  arguments) and check sums of the boot ROM, the whole and each 4 KiB of it.  Photographs of the pages are a
   complete report of the registers.  Built with
   `EXTRA_CFLAGS=-DHEXPAGES` it also shows the ROM itself, 784 bytes a
   page with a check byte at the end of every line;
@@ -232,10 +234,48 @@ disc afterwards.
     candump -L can0 > log.txt          # on the bench, while it runs
     rnse report log.txt --rom bootrom-192.bin
 
-What it would settle: which processor is in the Aisin-marked package
+### The card processors of the 192
+
+The two signal processors behind the SD slots (NEC µPD77115A,
+`docs/hardware.md`, "SD card processors") do nothing until a program
+is loaded into them.  The report loads one of its own into each, some
+thirty instructions written out in `sdk/examples/report/dsp.c` (the
+stock software's program is not used and not needed), which
+
+* sends the levels on the processor's eight port pins.  After a reset
+  they are all inputs, and the board's straps show: pins 7 to 4 are the
+  multiplier of the processor's clock, pins 1 and 0 its boot mode;
+* sends its clock control and host status registers;
+* runs a loop of 1024 x 32768 clocks on its clock input, which is the
+  22.5792 MHz crystal of the card board, and says when it is done;
+* switches to the multiplied clock, as the stock program does, and
+  runs the loop again.
+
+The main processor times both loops with its timer 0.  A crystal with
+its frequency printed on it against that timer gives **the main
+processor's peripheral clock**, independently of the clock register:
+1.486 s is 21.85 million counts at 58.8 MHz and half that at 29.4.  The
+two loops against each other give the multiplier a second time, and
+whether an instruction of that loop takes one clock, as the manual
+says and the emulator has it.  `rnse report` says all of this in
+words.  Nothing is written to a card, the processors' pins stay
+inputs, and both are back in reset when the pages start.
+
+What the emulator answers, which is what it assumes and the report
+would confirm or correct: pins `3f` (multiplier 3 for 67.7 MHz, host
+word boot, pins 3 and 2 high), clock control 0, and the two times in
+the ratio 3.  A result other than 1 on a processor's page says how far
+the questions got (`dsp.h`): `e1` means its boot ROM took no word at
+all, which would say the reset line or the port are not where the
+emulator has them.
+
+### What it would settle
+
+Which processor is in the Aisin-marked package
 (PVR, PRR); whether the 192's peripheral clock is 58.8 MHz, as the
 emulator now has it by analogy with the 193, or 29.4 MHz (the clock
-register's last three bits); how the bus and the ports are really set
+register's last three bits, and the card processors' crystal as a
+second witness); the card processors' clock and straps; how the bus and the ports are really set
 up when a loader starts; and, with the ROM, everything about the boot
 ROM that `docs/boot-rom.md` has had to infer.  A boot ROM image is
 firmware like the rest and must not go into the repository.

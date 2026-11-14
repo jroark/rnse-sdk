@@ -13,10 +13,13 @@
  * not in listen-only mode, at 100 kbit/s), all of that and the boot ROM
  * itself go out there as well, over and over:
  *
- *   7F1  'R', unit (0x92 or 0x93), 1, number of registers,
+ *   7F1  'R', unit (0x92 or 0x93), 2, number of registers,
  *        length of the ROM (3 bytes), pass
  *   7F2  index, size, address (4 bytes)        one pair of these
- *   7F3  index, size, value (4 bytes)          for every register
+ *   7F3  index, size, value (4 bytes)          for every register,
+ *        and for what follows them under made-up addresses: the
+ *        state at the start (1-7) and, on the 192, what its two card
+ *        processors say (0x10-0x16 and 0x20-0x26, see dsp.h)
  *   7F4  0, 0, 0, 0, CRC-32 of the ROM (4 bytes)
  *   7F0  offset (3 bytes), 5 bytes of the ROM
  *
@@ -31,6 +34,7 @@
  * bytes a page with a check byte at the end of every line (the sum of
  * the line's bytes), for a unit with nothing on its bus. */
 #include "rnse.h"
+#include "dsp.h"
 
 #ifndef ROUNDS
 #define ROUNDS 6
@@ -96,9 +100,19 @@ static const struct reg regs_193[] = {
 };
 
 #define MAX_REGS 96
-static u32 values[MAX_REGS + 8];
+static u32 values[MAX_REGS + 7 + 2 * DSP_VALUES];
 static const struct reg *regs;
 static int nregs;
+/* How many values follow the registers, and the address each goes by. */
+static int nextra = 7;
+
+static u32 extra_addr(int k)
+{
+    if (k < 7)
+        return (u32)k + 1;
+    k -= 7;
+    return 0x10u * (1 + (u32)(k / DSP_VALUES)) + (u32)(k % DSP_VALUES);
+}
 
 static u32 rom_size;
 static u32 rom_crc;
@@ -133,7 +147,7 @@ static void line(int row, const char *text, u8 colour, int scale)
 
 static void title(const char *what, int page, int pages)
 {
-    char text[40], *p = text;
+    char text[56], *p = text;
     const char *q = "RNSE REPORT 19";
     screen_fill(0, 0, screen_width, screen_height, 0);
     while (*q)
@@ -194,6 +208,16 @@ static void state_page(int page, int pages)
     pair(10, "ROM CRC   ", rom_crc);
 }
 
+/* What the 192's card processors answered (dsp.h). */
+static void dsp_page(int n, int page, int pages)
+{
+    static const char *const names[DSP_VALUES] = { "RESULT", "PINS  ", "CLOCK ", "HOST  ", "TIME 1", "TIME 2", "LOOPS " };
+    int i;
+    title(n ? "CARD PROCESSOR 1" : "CARD PROCESSOR 0", page, pages);
+    for (i = 0; i < DSP_VALUES; i++)
+        pair(1 + i, names[i], dsp_values[n][i]);
+}
+
 static void crc_page(int page, int pages)
 {
     int i;
@@ -248,7 +272,7 @@ static int send_next(void)
     if (at == 0) {
         d[0] = 'R';
         d[1] = screen_width == 400 ? 0x92 : 0x93;
-        d[2] = 1;
+        d[2] = 2;
         d[3] = (u8)nregs;
         d[4] = (u8)(rom_size >> 16);
         d[5] = (u8)(rom_size >> 8);
@@ -256,11 +280,10 @@ static int send_next(void)
         d[7] = (u8)pass;
         if (can_send(0x7f1, d, 8))
             return -1;
-    } else if (at <= (u32)(2 * (nregs + 7))) {
-        /* The registers, then the seven values of the start state
-         * under made-up addresses 1 to 7. */
+    } else if (at <= (u32)(2 * (nregs + nextra))) {
+        /* The registers, then the values that have made-up addresses. */
         int n = (int)(at - 1) / 2;
-        u32 v = (at - 1) & 1 ? values[n] : n < nregs ? regs[n].addr : (u32)(n - nregs + 1);
+        u32 v = (at - 1) & 1 ? values[n] : n < nregs ? regs[n].addr : extra_addr(n - nregs);
         d[0] = (u8)n;
         d[1] = n < nregs ? regs[n].size : 4;
         for (i = 0; i < 4; i++)
@@ -268,14 +291,14 @@ static int send_next(void)
         d[6] = d[7] = 0;
         if (can_send((at - 1) & 1 ? 0x7f3 : 0x7f2, d, 8))
             return -1;
-    } else if (at == (u32)(2 * (nregs + 7)) + 1) {
+    } else if (at == (u32)(2 * (nregs + nextra)) + 1) {
         d[0] = d[1] = d[2] = d[3] = 0;
         for (i = 0; i < 4; i++)
             d[4 + i] = (u8)(rom_crc >> (24 - 8 * i));
         if (can_send(0x7f4, d, 8))
             return -1;
     } else {
-        u32 off = (at - (u32)(2 * (nregs + 7)) - 2) * 5;
+        u32 off = (at - (u32)(2 * (nregs + nextra)) - 2) * 5;
         d[0] = (u8)(off >> 16);
         d[1] = (u8)(off >> 8);
         d[2] = (u8)off;
@@ -345,6 +368,20 @@ int main(void)
     screen_palette(2, 255, 96, 0);
     screen_palette(3, 120, 120, 120);
 
+    if (screen_width == 400) {
+        int n;
+        title("CARD PROCESSORS", 0, 0);
+        dsp_probe();
+        for (n = 0; n < 2; n++) {
+            for (i = 0; i < DSP_VALUES; i++) {
+                values[nregs + 7 + n * DSP_VALUES + i] = dsp_values[n][i];
+                console_hex(dsp_values[n][i]);
+                console_puts(i == DSP_VALUES - 1 ? "\n" : " ");
+            }
+        }
+        nextra = 7 + 2 * DSP_VALUES;
+    }
+
     /* The boot ROM: the 192's is the 48 KiB below the first module.
      * The 193's is somewhere in the 4 MiB its loader never erases:
      * up to the last byte there that is not 0xff, at most 1 MiB. */
@@ -374,10 +411,16 @@ int main(void)
     console_puts("\n");
 
     can_init();
-    pages = (nregs + PER_PAGE - 1) / PER_PAGE + 2;
+    pages = (nregs + PER_PAGE - 1) / PER_PAGE + 2 + (nextra > 7 ? 2 : 0);
     for (round = 0; round < ROUNDS; round++) {
-        for (page = 0; page < pages - 2; page++) {
+        for (page = 0; page < (nregs + PER_PAGE - 1) / PER_PAGE; page++) {
             register_page(page, pages);
+            hold(PAGE_SECONDS);
+        }
+        if (nextra > 7) {
+            dsp_page(0, pages - 3, pages);
+            hold(PAGE_SECONDS);
+            dsp_page(1, pages - 2, pages);
             hold(PAGE_SECONDS);
         }
         state_page(pages - 1, pages);
