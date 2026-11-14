@@ -428,11 +428,13 @@ void board_init(void)
     REG32(DU + 0x18) = 0x76d43210; /* plane 6 shown */
     REG32(DU + 0x14) = 0x000f0000;
 
-    /* The tick: timer 0 at a quarter of the 25 MHz peripheral clock,
-     * 62438 counts = 10 ms, interrupt level 7. */
+    /* The tick: timer 0 at a quarter of the 50 MHz peripheral clock
+     * (49.95 MHz going by the stock software's 12488 counts for its
+     * 1 ms), 124876 counts = 10 ms, interrupt level 7.  (The stock
+     * loader's own tick, 62438 counts, is 5 ms.) */
     REG16(TCR0) = 0x0020;
-    REG32(TCOR0) = 0xf3e5;
-    REG32(TCNT0) = 0xf3e5;
+    REG32(TCOR0) = 124875;
+    REG32(TCNT0) = 124875;
     REG32(INT2PRI0) = 0x000e0000;
     REG32(INT2MSKCR) = MASK_TMU;
     REG8(TSTR) = 1;

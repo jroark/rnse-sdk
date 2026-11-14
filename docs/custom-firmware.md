@@ -296,8 +296,8 @@ not `--strict` is given:
 * the external watchdog of both units: once a program has started
   toggling the strobe, 1.5 s without an edge resets the unit.  The real
   limit is not known.  What is known is what the stock software does:
-  an edge every 20 ms from its tick, and never more than about 220 ms
-  between two (192) or 150 ms (193), from the first instruction on.  A
+  an edge every 10 ms from its tick, and never more than about 220 ms
+  between two (192) or 135 ms (193), from the first instruction on.  A
   program that keeps to that is as safe as the stock software;
 * interrupts only when unmasked in the controllers, with the stock
   priorities;
@@ -334,8 +334,15 @@ Not established:
   picture needs one of those, or needs the loader's exact timing, the
   emulator will not show it.
 * **Timing.**  The emulated CPU executes one instruction per clock
-  cycle at an estimated clock; the watchdog's real period, the display's
-  real requirements and the serial port's real bit rate are unknown.
+  cycle at an estimated clock (`--cpu-ratio` tries others); the
+  watchdog's real period and the display's real requirements are
+  unknown.  The timers' clock is known on the 193, where the unit's own
+  sound output measures it (50 MHz, a tick of 1 ms for the stock
+  software); on the 192 it follows from the two units' software having
+  the same timer values in the ratio of their clocks (58.8 MHz) and is
+  not measured.  The emulator had both at half that until the sound
+  output was modelled, and the SDK's "10 ms" tick was 5 ms then; it is
+  10 ms by the corrected clocks.
 * **The faceplate in the loader's place.**  The link's set-up is the
   operating system's, but the operating system runs after the boot ROM
   has started every module; whether the pins of that serial port and
@@ -369,7 +376,11 @@ If you do try it on a unit, try the probe first:
     rnse info disc.iso                  # the disc's index for your variant
     rnse custom disc.iso V220 sdk/out/probe-192.bin probe.iso --index 0660
     rnse boot probe.iso --variant V220 --ignition --installed-index 0650 \
-        --cycles 40000000000 --shot 30000:probe.png   # the whole circle, emulated
+        --cpu-ratio 5 --cycles 30000000000 --shot 30000:probe.png   # the whole circle, emulated
+
+(`--cpu-ratio 5` is for the European 192 only: at the emulator's
+default pace its stock software's start of a loader runs into the
+collision described below.)
 
 with the update disc for exactly that kind of unit, of the software the
 unit has (or newer), and an index higher than the unit's in its second
@@ -379,11 +390,20 @@ adds up every module on it), the probe's picture with a count-down from
 60, then the stock update's own screens, then the unit as it was, with
 the disc's index.  Other outcomes:
 
+* on a European 192 (V220), the unit starts again once or a few times
+  before the picture comes.  The stock software's start of a loader
+  can fail by itself there, about one time in six by the emulator's
+  numbers, whatever the loader is: one of its own timer handlers runs
+  into the loader's image ("Starting the loader" in
+  [boot-rom.md](boot-rom.md)).  What a unit does then is the boot
+  ROM's business and not known; a restart and another try is the
+  likely thing, and nothing has been written anywhere by then;
 * nothing, and the unit carries on as usual: it did not take the disc
   for an update (index not higher, wrong variant, or a check the
   emulator does not know about).  The disc comes out as usual;
-* the unit restarts again and again without a picture: the program was
-  started and failed, and the watchdog resets the unit each time.  This
+* the unit restarts again and again without ever showing the picture:
+  the program was started and failed, and the watchdog resets the unit
+  each time.  This
   is the trap described above.  The program writes nothing to flash
   and the installed software records nothing about the update before it
   starts the loader, so the software in the unit is intact, but getting
@@ -392,6 +412,8 @@ the disc's index.  Other outcomes:
   the hand-over as the part that failed.
 
 The debug serial port is a header inside
-the unit; its location and bit rate are not known.  What would help
+the unit; its location is not known.  On the 193 the divisor the stock
+loader gives it, which the SDK copies, makes 57600 bit/s from the 50
+MHz peripheral clock.  What would help
 most is a report of what the screen shows, and, from an opened unit,
 the markings of the chips.

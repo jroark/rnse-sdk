@@ -135,7 +135,7 @@ void panel_poll(void)
     if (!started)
         return;
     if (waiting) {
-        /* The stock software gives the controller two seconds and then
+        /* The stock software gives the controller a second and then
          * resets it; a repeat after 300 ms is this code's own choice. */
         if (now - sent_time >= 300) {
             if (++attempts > 5) {
@@ -146,7 +146,7 @@ void panel_poll(void)
         }
     } else if (setting[1] && now - busy_time >= 20) {
         /* One frame at a time, with a pause after anything else on the
-         * line: the stock software leaves 20 ms and more. */
+         * line: the stock software leaves 10 ms and more. */
         send_setting();
     }
 }

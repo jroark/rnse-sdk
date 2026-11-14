@@ -360,11 +360,12 @@ void board_init(void)
     REG16(CORAL_DISP + 0x2c) = 0;
     REG16(CORAL_DISP + 0x00) = 0x8008; /* that layer on */
 
-    /* The tick: timer 0 at a quarter of the 29.4 MHz peripheral clock,
-     * 73500 counts = 10 ms, interrupt level 7. */
+    /* The tick: timer 0 at a quarter of the 58.8 MHz peripheral clock,
+     * 147000 counts = 10 ms, interrupt level 7.  (The stock loader's
+     * own tick, 73500 counts, is 5 ms.) */
     REG16(TCR0) = 0x0020;
-    REG32(TCOR0) = 0x00011f1b;
-    REG32(TCNT0) = 0x00011f1b;
+    REG32(TCOR0) = 146999;
+    REG32(TCNT0) = 146999;
     REG16(IPRA) = 0x7000;
     REG8(TSTR) = 1;
 
