@@ -180,6 +180,15 @@ emulated bus every 300 ms, `--can-alone` takes every other node away).
 The program keeps to the memory the stock loader's image occupies.  It
 uses no service of the boot ROM.
 
+Not in the kit: sound, and the SD cards.  On the 192 both are behind
+the two signal processors of the card board, which do nothing until a
+program is loaded into them; the emulator has those processors
+(`docs/hardware.md`, "SD card processors"), so a driver for them could
+be written and tried here, with a program of one's own for them or with
+the one the stock software carries, read from the disc at run time (it
+is part of the stock software and cannot be put into the kit).  Neither
+has been done.
+
 There is no C library.  The compiler's own support routines are not
 there either, so `/` and `%` on variables will not link: use `udiv` and
 `umod`.  Floating point is switched off (`-m4-nofpu`).
