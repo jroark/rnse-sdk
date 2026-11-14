@@ -275,15 +275,16 @@ emulator has them.
 `sdk/examples/drive` is a third program for a real unit, about one
 question: what the drive answers while a disc goes in.  The stock
 software takes a disc that is put in while it runs for an update only
-if the drive's answers come in a way the emulator does not reproduce
-(`docs/boot-rom.md`, "A disc that goes in while the unit runs"), and
-what the real drive does cannot be had from the software.
+if the drive answers in a particular way while it loads the disc.  The
+emulator's drive answers the one way that suits all the software seen
+(`docs/boot-rom.md`, "A disc that goes in while the unit runs"); that
+is an inference, and this program is the measurement.
 
 The program runs from memory, so its disc can leave.  It asks the
 drive ten times a second whether it is ready and, if not, why, and
 writes a line for every change: the time in milliseconds and `READY`
-or the sense data (`2/3A/00` no disc, `2/04/01` becoming ready,
-`6/28/00` the medium may have changed).  CD EJECT has the drive push
+or the sense data (`2/3A/00` no disc, `2/04/00` not ready, `2/04/01`
+becoming ready, `6/28/00` the medium may have changed).  CD EJECT has the drive push
 the disc out; take it and push it back in, as often as there is room
 on the screen (eleven lines; the log wraps), with the update disc and
 with other discs.  SETUP, with the update disc in the drive, hands over
@@ -298,10 +299,11 @@ three numbers, and 0 for an error, 1 for ready, 2 for no answer).
         --key SETUP@16000 --cycles 5000000000        # what the emulator answers
 
 In the emulator the log reads `READY`, `2/3A/00` at the eject,
-`2/04/01` when the disc is back, `6/28/00` six seconds later and
+`2/04/00` when the disc is back, `6/28/00` six seconds later and
 `READY` a tenth of a second after that.  A photograph of the real
-thing is what the drive's model needs: how long each answer lasts, and
-whether `6/28/00` comes before `2/04/01` or after.
+thing is what the drive's model needs: what the drive says while it
+loads (`2/04/00`, as assumed, or `2/04/01`, or still `2/3A/00`), for
+how long, and whether `6/28/00` comes before that or after.
 
 ### What it would settle
 

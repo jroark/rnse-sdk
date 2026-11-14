@@ -3,11 +3,12 @@
  * you ready".
  *
  * The emulator has to assume how the drive behaves when a disc is put
- * in: for how long it says "becoming ready", and whether "the medium
- * may have changed" comes before that or after.  The stock software
- * takes a disc that goes in while it runs for an update only if those
- * answers come as it expects (docs/boot-rom.md, "A disc that goes in
- * while the unit runs"), so this is worth knowing exactly.
+ * in: what it says while it loads the disc and for how long, and
+ * whether "the medium may have changed" comes before that or after.
+ * The stock software takes a disc that goes in while it runs for an
+ * update only if those answers come as it expects (docs/boot-rom.md,
+ * "A disc that goes in while the unit runs"); the emulator's drive
+ * says what suits all the software seen, which is an inference.
  *
  * The program runs from memory, so the disc it came on can leave:
  *
@@ -20,7 +21,8 @@
  * REQUEST SENSE.  A line is written for every change: the time in
  * milliseconds since the program started, and READY or the three
  * numbers of the sense data (key/code/qualifier, e.g. 2/3A/00 no disc,
- * 2/04/01 becoming ready, 6/28/00 the medium may have changed).  The
+ * 2/04/00 not ready, 2/04/01 becoming ready, 6/28/00 the medium may have
+ * changed).  The
  * lines go to the screen (photograph it), to the debug serial port and
  * to the CAN bus:
  *
