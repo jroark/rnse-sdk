@@ -140,6 +140,9 @@ int stock_update(void);
 /* What the program was started with: the screen language (0..8) and
  * two values the stock loader gets as well. */
 extern u32 start_args[3];
+/* And what its caller had at that moment: SR, VBR, the return address
+ * and the stack pointer. */
+extern u32 start_state[4];
 /* From the hardware layer: 4 MB of RAM (and 64 KB below it) that
  * neither the program nor the stock loader has in use. */
 extern const u32 way_back_scratch;

@@ -151,7 +151,8 @@ the stock software (`stock_update`, above), and the keys and
 knobs of the faceplate (`panel_init`, `panel_poll`, `panel_key`,
 `panel_knob`), and the CD drive (`cd_init`, `cd_wait_ready`, `cd_read`,
 `cd_find` for a file in the root directory of the disc), and the car's
-CAN bus (`can_init`, `can_send`, `can_receive`).  Five examples:
+CAN bus (`can_init`, `can_send`, `can_receive`).  Six examples
+(`sdk/examples/report` has a section of its own below):
 `sdk/examples/probe` is the one for a first try on a unit (see "The way
 back"); `sdk/examples/hello` draws a test picture and counts seconds;
 `sdk/examples/keys` shows what the faceplate reports (`sdk/build.sh 193
@@ -182,6 +183,60 @@ uses no service of the boot ROM.
 There is no C library.  The compiler's own support routines are not
 there either, so `/` and `%` on variables will not link: use `udiv` and
 `umod`.  Floating point is switched off (`-m4-nofpu`).
+
+## A report from a unit, and its boot ROM
+
+`sdk/examples/report` is the probe with a purpose: before it sets
+anything up it reads the processor's own registers as the installed
+software and the boot ROM have left them (identification, clock
+ratios, bus set-up, timers, interrupt priorities, serial port
+settings; on the 193 only registers its stock software uses itself),
+and it reads the boot ROM, the one part of the unit's software that is
+on no disc.  Then it shows all of it and sends all of it:
+
+* on the screen, page after page, twelve lines of address and value to
+  a page, then the state it was started in (SR, VBR, where its caller
+  was, the stack pointer, the arguments) and check sums of the boot
+  ROM, the whole and each 4 KiB of it.  Photographs of the pages are a
+  complete report of the registers.  Built with
+  `EXTRA_CFLAGS=-DHEXPAGES` it also shows the ROM itself, 784 bytes a
+  page with a check byte at the end of every line;
+* on the CAN bus, if anything there acknowledges frames (an adapter at
+  100 kbit/s that is not in listen-only mode; the transceiver in the
+  unit is a fault-tolerant low-speed one): identifiers 0x7F0 to 0x7F4,
+  round after round, a round of the 192's 48 KiB taking some 15
+  seconds.  `rnse report log.txt --rom rom.bin` puts a log of the
+  frames back together (candump's formats and a few others), fills
+  what one round lost from the next, checks the ROM against the check
+  sum the unit computed, names the registers and says what the clock
+  register means;
+* on the debug serial port, the registers and the ROM's check sum.
+
+After six rounds of the pages (`-DROUNDS=n`, `-DPAGE_SECONDS=n`) it
+hands over to the stock loader like the probe, so the same disc and
+the same procedure apply: build it, put it on a copy of the unit's
+update disc with a higher index, and the unit updates itself from that
+disc afterwards.
+
+    sdk/build.sh 192 report
+    rnse custom disc.iso V220 sdk/out/report-192.bin report.iso --index 0660
+    candump -L can0 > log.txt          # on the bench, while it runs
+    rnse report log.txt --rom bootrom-192.bin
+
+What it would settle: which processor is in the Aisin-marked package
+(PVR, PRR); whether the 192's peripheral clock is 58.8 MHz, as the
+emulator now has it by analogy with the 193, or 29.4 MHz (the clock
+register's last three bits); how the bus and the ports are really set
+up when a loader starts; and, with the ROM, everything about the boot
+ROM that `docs/boot-rom.md` has had to infer.  A boot ROM image is
+firmware like the rest and must not go into the repository.
+
+In the emulator the program reads back the emulator's own stand-ins
+(`tests/disc.rs`, `report_program_sends_the_boot_rom`), which proves
+the plumbing and nothing about a unit.  The registers of the 192's
+list are in the SH7750R's manual and reading them does nothing; that
+the processor in the package is one where that holds is likely and
+not certain.
 
 ## How the hardware layers were written
 
@@ -302,7 +357,8 @@ not `--strict` is given:
 * interrupts only when unmasked in the controllers, with the stock
   priorities;
 * the CAN controller sends and receives only out of its reset and halt
-  states; `--strict` says when frames went out with other bit timing
+  states, and a frame it sends takes its time on the bus (1.2 ms for
+  eight bytes at 100 kbit/s) before it counts as sent; `--strict` says when frames went out with other bit timing
   than the stock software's, and `--can-alone` leaves every frame
   unacknowledged, as on a bench;
 * serial ports send only with the transmitter on and hear only with the

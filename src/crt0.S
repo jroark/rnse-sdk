@@ -31,6 +31,12 @@ _start:
         ! open and its own handlers in place, and none of that is relied
         ! on.  The arguments are kept for the stock loader, should the
         ! program hand over to it in the end.
+        ! (What the caller had is kept as well, for the curious: SR,
+        ! VBR, the return address and the stack pointer.)
+        stc     sr, r11
+        stc     vbr, r12
+        sts     pr, r13
+        mov     r15, r14
         mov.l   1f, r0
         ldc     r0, sr
         mov     r4, r8
@@ -52,6 +58,11 @@ _start:
         mov.l   r8, @r1
         mov.l   r9, @(4, r1)
         mov.l   r10, @(8, r1)
+        mov.l   12f, r1
+        mov.l   r11, @r1
+        mov.l   r12, @(4, r1)
+        mov.l   r13, @(8, r1)
+        mov.l   r14, @(12, r1)
         ! Exceptions may be taken from here on (BL = 0); interrupts stay
         ! masked until board_init has set the hardware up.
         mov.l   8f, r0
@@ -70,6 +81,7 @@ _start:
 8:      .long   0x400000f0
 9:      .long   main
 11:     .long   start_args
+12:     .long   start_state
 
 ! Allow interrupts of every level (called by board_init at its end).
         .global irq_enable

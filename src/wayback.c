@@ -29,6 +29,7 @@ extern const u32 way_back_stub[], way_back_stub_end[];
 void irq_disable(void);
 
 u32 start_args[3];
+u32 start_state[4];
 
 #define UNCACHED(a) (((u32)(a) & 0x1fffffff) | 0xa0000000)
 
