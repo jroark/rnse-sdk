@@ -414,6 +414,9 @@ the disc's index.  Other outcomes:
 The debug serial port is a header inside
 the unit; its location is not known.  On the 193 the divisor the stock
 loader gives it, which the SDK copies, makes 57600 bit/s from the 50
-MHz peripheral clock.  What would help
-most is a report of what the screen shows, and, from an opened unit,
-the markings of the chips.
+MHz peripheral clock.  The 192's parts are known from
+photographs of an opened unit (`docs/hardware.md`, "The boards").  What
+would help most now is a report of what the screen shows, the same
+photographs of a 193, and the contents of the boot ROM: the first
+48 KiB of the flash chip at address 0, which a program started this
+way could read and send out.
