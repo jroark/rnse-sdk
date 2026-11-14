@@ -151,8 +151,9 @@ the stock software (`stock_update`, above), and the keys and
 knobs of the faceplate (`panel_init`, `panel_poll`, `panel_key`,
 `panel_knob`), and the CD drive (`cd_init`, `cd_wait_ready`, `cd_read`,
 `cd_find` for a file in the root directory of the disc), and the car's
-CAN bus (`can_init`, `can_send`, `can_receive`).  Six examples
-(`sdk/examples/report` has a section of its own below):
+CAN bus (`can_init`, `can_send`, `can_receive`).  Seven examples
+(`sdk/examples/report` and `sdk/examples/drive` have sections of their
+own below):
 `sdk/examples/probe` is the one for a first try on a unit (see "The way
 back"); `sdk/examples/hello` draws a test picture and counts seconds;
 `sdk/examples/keys` shows what the faceplate reports (`sdk/build.sh 193
@@ -268,6 +269,39 @@ the ratio 3.  A result other than 1 on a processor's page says how far
 the questions got (`dsp.h`): `e1` means its boot ROM took no word at
 all, which would say the reset line or the port are not where the
 emulator has them.
+
+### The drive's log
+
+`sdk/examples/drive` is a third program for a real unit, about one
+question: what the drive answers while a disc goes in.  The stock
+software takes a disc that is put in while it runs for an update only
+if the drive's answers come in a way the emulator does not reproduce
+(`docs/boot-rom.md`, "A disc that goes in while the unit runs"), and
+what the real drive does cannot be had from the software.
+
+The program runs from memory, so its disc can leave.  It asks the
+drive ten times a second whether it is ready and, if not, why, and
+writes a line for every change: the time in milliseconds and `READY`
+or the sense data (`2/3A/00` no disc, `2/04/01` becoming ready,
+`6/28/00` the medium may have changed).  CD EJECT has the drive push
+the disc out; take it and push it back in, as often as there is room
+on the screen (eleven lines; the log wraps), with the update disc and
+with other discs.  SETUP, with the update disc in the drive, hands over
+to the stock loader; without a key it does so after ten minutes
+(`-DMINUTES=n`).  The lines also go to the debug serial port and to
+the CAN bus (identifier 0x7F5: line number, time in three bytes, the
+three numbers, and 0 for an error, 1 for ready, 2 for no answer).
+
+    sdk/build.sh 192 drive
+    rnse custom disc.iso V220 sdk/out/drive-192.bin drive.iso --index 0660
+    rnse loader drive.iso --variant V220 --key CD_EJECT@3000 --disc-back 6000 \
+        --key SETUP@16000 --cycles 5000000000        # what the emulator answers
+
+In the emulator the log reads `READY`, `2/3A/00` at the eject,
+`2/04/01` when the disc is back, `6/28/00` six seconds later and
+`READY` a tenth of a second after that.  A photograph of the real
+thing is what the drive's model needs: how long each answer lasts, and
+whether `6/28/00` comes before `2/04/01` or after.
 
 ### What it would settle
 
