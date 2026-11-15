@@ -308,37 +308,33 @@ flash with its picture and the faceplate answering, the way out by the
 key, and the guard; afterwards the flash holds the stock software byte
 for byte and it starts.
 
-**None of it has been near a unit, and this is the one part of the SDK
-that can leave a unit without software.**  What the emulator cannot
-vouch for:
+**On a unit** (the North American 192, software 0371) the circle has
+been walked once, with `sdk/examples/installed`:
 
-* That a real boot ROM installs from a disc when it finds no software.
-  It is that unit's ROM that does it in the emulator, and it is what
-  an update that lost its power halfway has to rely on; but nobody has
-  watched a unit do it, and every way back goes through it.
-* The erase.  The commands are the stock loader's; the emulator's
-  flash is done at once, a real sector takes a quarter of a second and
-  answers with its status meanwhile, which the routine waits out
-  without ever having seen it.
-* The guard's cell is no longer among them: `sdk/examples/preflight`,
-  from a card, wrote a count next to it (0x3ff10) on a unit and found
-  it again one higher at every run, three times through a restart
-  with the stock software running in between and once through the
-  power being off.  The guard's own three words read the same
-  arbitrary values each time (0x01222fd7, 0x0b827ffe, 0x0b02ef2b):
-  memory nobody has written, by the look of it, which the guard takes
-  for "no count yet".  The flash chips gave their identity to the
-  erase's first commands from a program's place (maker 4, device
-  0x227e, both).
-* What the hardware wants at a start without the stock software.  A
-  program from a disc or a card finds the radio processor, the
-  faceplate controller and the card processors as that software left
-  them; a program from flash finds them as the boot ROM leaves them.
-  In the emulator the faceplate answers; the radio processor's
-  amplifier and the card processors have not been tried from there.
+* The stock software took the firmware disc for an update and its
+  loader installed it; 150 s after the software's start the unit was
+  reset and the boot ROM started the program from flash, with its
+  picture, the faceplate answering and the keys working.
+* CD EJECT pushed the disc out.
+* RETURN, held: the directory's sector was erased (the erase on real
+  chips, which the emulator's flash could not vouch for) and the unit
+  restarted, 32.8 s after the program's start.
+* **The boot ROM, finding no software and no disc, asked for one on
+  the screen**, and when the stock update disc went in it installed
+  it and started it: 169 s from the restart to the reset that ends the
+  update.  So a real boot ROM does install from a disc by itself,
+  which every way back rests on, and it waits for the disc.
 
-The first two can only be tried by doing them.  The third and fourth
-can be tried from a card first, and should be.
+What has still not happened on a unit: a start of the program after
+the power was off (the ROM starts it from reset in the emulator, and
+did after the loader's reset on the unit), the guard's count running
+to five, and the swap loader, since the disc was out when the program
+went.  And a program from flash has not yet used the radio processor's
+amplifier or the card processors, which it finds as the boot ROM
+leaves them and not as the stock software does.
+
+This is still the one part of the SDK that can leave a unit without
+software: keep a stock update disc with the unit.
 
 ## Building and running
 
