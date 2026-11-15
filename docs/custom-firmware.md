@@ -333,9 +333,9 @@ been cut: the unit comes up into it by itself.
 
 What has still not happened on a unit: the guard's count running
 to five, and the swap loader, since the disc was out when the program
-went.  And a program from flash has not yet used the radio processor's
-amplifier or the card processors, which it finds as the boot ROM
-leaves them and not as the stock software does.
+went.  (A program from flash finds the radio processor and the card
+processors as the boot ROM leaves them and not as the stock software
+does; `sdk/examples/base`, below, has used both so.)
 
 This is still the one part of the SDK that can leave a unit without
 software: keep a stock update disc with the unit.
