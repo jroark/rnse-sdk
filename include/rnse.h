@@ -112,6 +112,10 @@ int cd_find(const char *name, u32 *sector, u32 *size);
  * and must have it for whole sectors: 0, -1 a read failed, -2 no such
  * file, -3 too long. */
 int sd_init(int slot);
+/* After a failure: the last card command (the interface's command
+ * register value), the header of the processor's answer and two words
+ * of it. */
+extern u16 sd_last[4];
 int sd_read(u32 sector, void *buf);
 int sd_load(const char *name, void *to, u32 max, u32 *size);
 

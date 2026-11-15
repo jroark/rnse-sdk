@@ -60,6 +60,19 @@ static const struct step { u8 kind; u32 at; u16 count; } recipe[] = {
 static int slot = -1;
 static int high_capacity;
 
+/* For whoever wants to say why it did not work: the last command's
+ * register value, the header of what the processor answered (0xee..
+ * is its "failed", with a code in the first word), and two words of
+ * the answer. */
+u16 sd_last[4];
+
+/* The stock driver leaves 150 ms between any two steps of a card's
+ * start, and a real card wants the time. */
+static void pause(void)
+{
+    delay_ms(150);
+}
+
 static int wait_low(u8 mask, u32 ms)
 {
     u32 start = millis();
@@ -132,11 +145,16 @@ static int command(u16 head, u16 reg, u32 arg, u16 *r, int expect)
     int i, got;
     for (i = 0; i < 9; i++)
         r[i] = 0;
+    sd_last[0] = reg;
+    sd_last[1] = sd_last[2] = sd_last[3] = 0;
     if (say(m, 4))
         return -1;
     if (!expect)
         return 0;
     got = answer(r, 9, 2000);
+    sd_last[1] = (u16)got;
+    sd_last[2] = r[0];
+    sd_last[3] = r[1];
     return got < 0 || (got >> 8) == 0xee ? -1 : 0;
 }
 
@@ -174,7 +192,7 @@ int sd_init(int which)
     static const u16 a[] = { 0x7301, 0x0002 }, b[] = { 0x3301, 0x0001 }, c[] = { 0x3101, 0x0001 };
     static const u16 d[] = { 0x3201, 0x0000 }, e[] = { 0x0301, 0x0000 }, f[] = { 0x0301, 0x0001 }, g[] = { 0x7400 };
     u16 r[9], rca;
-    u32 t, ocr = 0, i;
+    u32 t, ocr = 0, hcs, i;
 
     if (screen_width != 400)
         return -1; /* the 193 has a card interface of its own, and no driver here */
@@ -199,47 +217,86 @@ int sd_init(int which)
             return -4;
     if (answer(r, 9, 1000) < 0)
         return -4;
-    /* The card interface: its slow clock, and the card's start. */
-    if (poke(0, 0x3814, 0x3802) || poke(1, 0x4fb1, 0x0100) || say(e, 2))
-        return -5;
-    if (command(0x0b03, 0x4800, 0, r, 0))          /* CMD0 */
-        return -6;
-    command(0x0b03, 0x4c08, 0x000001aa, r, 1);     /* CMD8: answered by newer cards only */
-    t = millis();
-    do {
-        if (command(0x0b03, 0x4c37, 0, r, 1))      /* CMD55 */
-            return -7;
-        if (command(0x0b03, 0x4c29, 0x40ff0000, r, 1)) /* ACMD41 */
-            return -7;
-        ocr = (u32)(r[0] & 0xff) << 24 | (u32)r[1] << 8 | r[2] >> 8;
-        if (millis() - t > 3000)
-            return -8;
-        if (!(ocr & 0x80000000))
-            delay_ms(20);
-    } while (!(ocr & 0x80000000));
-    high_capacity = (ocr & 0x40000000) != 0;
-    if (!high_capacity) {
-        /* As the stock driver does for a standard card: once more
-         * without the claim to know the other kind. */
-        if (command(0x0b03, 0x4c37, 0, r, 1) || command(0x0b03, 0x4c29, 0x00ff0000, r, 1))
-            return -7;
-    }
+    /* The card interface: its slow clock, and the card's start, a step
+     * every 150 ms as the stock driver has it. */
+    pause();
     if (poke(0, 0x3814, 0x3802))
         return -5;
+    pause();
+    if (poke(1, 0x4fb1, 0x0100))
+        return -5;
+    pause();
+    if (say(e, 2))
+        return -5;
+    pause();
+    if (command(0x0b03, 0x4800, 0, r, 0))          /* CMD0 */
+        return -6;
+    pause();
+    /* CMD8 is answered by cards of version 2 of the specification
+     * only; to the others the host does not claim to know
+     * high-capacity cards. */
+    hcs = command(0x0b03, 0x4c08, 0x000001aa, r, 1) ? 0 : 0x40000000;
+    t = millis();
+    for (;;) {
+        pause();
+        if (command(0x0b03, 0x4c37, 0, r, 1))      /* CMD55 */
+            return -7;
+        pause();
+        if (command(0x0b03, 0x4c29, hcs | 0x00ff0000, r, 1)) /* ACMD41 */
+            return -7;
+        ocr = (u32)(r[0] & 0xff) << 24 | (u32)r[1] << 8 | r[2] >> 8;
+        if (ocr & 0x80000000)
+            break;
+        if (millis() - t > 6000)
+            return -8;
+        pause();
+        if (poke(0, 0x3814, 0x3802))
+            return -5;
+    }
+    high_capacity = (ocr & 0x40000000) != 0;
+    if (hcs && !high_capacity) {
+        /* As the stock driver does for a standard card that answered
+         * CMD8: once more without the claim. */
+        pause();
+        if (command(0x0b03, 0x4c37, 0, r, 1))
+            return -7;
+        pause();
+        if (command(0x0b03, 0x4c29, 0x00ff0000, r, 1))
+            return -7;
+    }
+    pause();
+    if (poke(0, 0x3814, 0x3802))
+        return -5;
+    pause();
     if (command(0x0b03, 0x4c42, 0, r, 1))          /* CMD2 */
         return -9;
+    pause();
     if (command(0x0b03, 0x4c03, 0, r, 1))          /* CMD3: the card's address */
         return -9;
     rca = (u16)((r[0] & 0xff) << 8 | r[1] >> 8);
-    if (command(0x0b03, 0x4c49, (u32)rca << 16, r, 1) || command(0x0b03, 0x4c4a, (u32)rca << 16, r, 1)) /* CMD9, CMD10 */
+    pause();
+    if (command(0x0b03, 0x4c49, (u32)rca << 16, r, 1)) /* CMD9 */
+        return -9;
+    pause();
+    if (command(0x0b03, 0x4c4a, (u32)rca << 16, r, 1)) /* CMD10 */
         return -9;
     /* The fast clock, the card selected, sectors of 512 bytes. */
-    if (poke(0, 0x3814, 0x0c02) || poke(1, 0x4fb1, 0x0004))
+    pause();
+    if (poke(0, 0x3814, 0x0c02))
         return -5;
-    if (command(0x0b03, 0x4c07, (u32)rca << 16, r, 1) || command(0x0b03, 0x4c10, 0x200, r, 1)) /* CMD7, CMD16 */
+    pause();
+    if (poke(1, 0x4fb1, 0x0004))
+        return -5;
+    pause();
+    if (command(0x0b03, 0x4c07, (u32)rca << 16, r, 1)) /* CMD7 */
         return -10;
+    pause();
+    if (command(0x0b03, 0x4c10, 0x200, r, 1))      /* CMD16 */
+        return -10;
+    pause();
     if (say(f, 2))
         return -11;
+    pause();
     if (put(g[0]) || answer(r, 9, 1000) < 0)
         return -11;
     return 0;

@@ -78,8 +78,11 @@ int main(void)
         number("SLOT", slot + 1);
         r = sd_init(slot);
         record((u8)slot, (u32)r, millis() - t);
+        record((u8)(8 + slot), (u32)sd_last[0] << 16 | sd_last[1], sd_last[2]);
         if (r) {
             number("  NO CARD, OR NOT STARTED:", r);
+            number("    AT COMMAND", sd_last[0] & 0x3f);
+            number("    ANSWER", sd_last[1]);
             continue;
         }
         t = millis();
