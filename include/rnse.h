@@ -176,7 +176,8 @@ extern int radio_answered;
 /* For a program started by the boot ROM (from flash): the line to the
  * radio processor set up and the frames the stock software sends it
  * at every start, the tuner as the source at the end.  The number of
- * frames that went unanswered. */
+ * frames that went unanswered; 99 when the first two did and the rest
+ * was not tried. */
 int radio_start(void);
 int radio_tune(int frequency);
 int radio_status(u8 *status, int max);

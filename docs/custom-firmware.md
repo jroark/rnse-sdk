@@ -349,9 +349,18 @@ nothing when MEDIA is first pressed (with `sd_idle` set to
 `panel_poll`, so that the faceplate controller is answered through the
 seconds that takes).  In the emulator, started by a unit's boot ROM, it
 tunes, plays a file from a card and goes back
-(`a_firmware_from_flash_is_a_radio_and_a_player`); whether a real radio
-processor and a real card take the same from that state is for a unit
-to say.
+(`a_firmware_from_flash_is_a_radio_and_a_player`); and on a unit, installed in flash, the card half works: a card was
+started from nothing and its file played through.  The radio
+processor answered nothing, not one of nineteen frames, and so there
+was no sound and every turn of a knob waited two seconds for an answer
+that did not come.  The line's format was wrong: `radio_start` had
+set the faceplate's (mode 0x0011, with a parity bit), and the radio
+processor's is mode 0, eight bits and no parity, which is what the
+boot ROM and the stock software both write (seen in the emulator's log
+of their register writes, which is where it should have been looked up
+in the first place).  A program from a card never noticed, the line
+being set already.  The emulator's stand-in took any format; it hears
+only mode 0 now.
 
 ## Building and running
 

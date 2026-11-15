@@ -141,8 +141,10 @@ int radio_status(u8 *status, int max)
 
 /* The radio processor's line and its start, for a program that the
  * boot ROM starts (from flash) and that finds neither as the installed
- * software leaves them.  The line as that software has it: 9600 bit/s,
- * eight bits and even parity, like the faceplate's.  And then the
+ * software leaves them.  The line as that software and the boot ROM
+ * set it: 9600 bit/s, eight bits, no parity (mode 0: not the
+ * faceplate's format, which has a parity bit; a unit's radio processor
+ * answered nothing sent with that).  And then the
  * frames that software sends at every start, in its order: what each
  * of them is for is known of few (0x0b asks for the version, 0x88 for
  * the status, 0x19 [01 n] would be the volume), so they are sent as
@@ -164,15 +166,25 @@ int radio_start(void)
     int silent = 0;
     if (screen_width != 400)
         return -1;
+    /* (Register for register as the stock software's set-up, but for
+     * the receive interrupt, which nobody would take here.) */
     REG16(UART1 + 0x04) = 0;
-    REG16(UART1 + 0x08) = REG16(UART1 + 0x08) & 0xffc7;
-    REG16(UART1 + 0x00) = 0x0011;
+    REG16(UART1 + 0x00) = 0x0000;
     REG16(UART1 + 0x02) = 0x005f;
-    REG16(UART1 + 0x0c) = 0x8080;
-    REG16(UART1 + 0x04) = 0x0010; /* the receiver; the transmitter for each frame */
-    for (i = 0; i < sizeof frames / sizeof frames[0]; i++)
+    REG16(UART1 + 0x0c) = 0x0000;
+    REG16(UART1 + 0x0e) = 0x0000;
+    REG16(UART1 + 0x08) = 0x0104;
+    REG16(UART1 + 0x0c) = 0x8000;
+    REG16(UART1 + 0x0c) = 0x0000;
+    REG16(UART1 + 0x04) = 0x0018; /* the receiver; the transmitter for each frame */
+    for (i = 0; i < sizeof frames / sizeof frames[0]; i++) {
         if (radio_command(frames[i][0], frames[i] + 2, frames[i][1], answer, sizeof answer) < 0)
             silent++;
+        /* A radio processor that hears nothing is not waited for
+         * nineteen times over (two seconds each). */
+        if (i == 1 && silent == 2)
+            return 99;
+    }
     if (radio_source(RADIO_TUNER, 7))
         silent++;
     for (i = 0; i < sizeof later / sizeof later[0]; i++)
