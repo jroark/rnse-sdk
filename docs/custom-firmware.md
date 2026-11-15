@@ -92,12 +92,11 @@ any number of tries; the disc comes out on the eject key in the half
 minute before each start.  The probe and the drive's log can be built
 to end that way (`-DRESTART`), and the drive's log restarts on RETURN.
 In the emulator this needs a real boot ROM in the stand-in's place
-(`--boot-rom`; the stand-in stops the run at a reset), and it goes
-round as described unless the drive is given its times (`--drive-times`,
-`--strict`): then the stock software's second big read after the
-restart gets no data and it never starts the program again.  A unit
-does start the program again ("On a real unit"), so that is a fault of
-the emulated drive; it is not understood.
+(`--boot-rom`; the stand-in stops the run at a reset), and then it goes
+round as on the unit, `--strict` included.  (It did not at first with
+the drive given its times: the end of one DMA transfer was marked on
+the next, which the software had already set up, and that one never
+started.  `src/sh4/onchip.rs`, `dma_finish`.)
 
 The emulator runs the whole circle, with the stock software at both
 ends (`rnse boot probe.iso --installed-index ...`, and the test
@@ -112,7 +111,9 @@ is left of the program from the instruction cache.
 ## Building and running
 
 You need an SH-4 GCC that can produce big-endian code without its
-libraries; Debian's and Ubuntu's `gcc-sh4-linux-gnu` will do.
+libraries; Debian's and Ubuntu's `gcc-sh4-linux-gnu` will do.  Where
+there is none to install (macOS), `tools/sh4-docker` runs that one in a
+container: `PATH=$PWD/tools/sh4-docker:$PATH sdk/build.sh 192`.
 
     sdk/build.sh 193                 # or 192; writes sdk/out/hello-193.bin
     rnse custom disc.iso V574 sdk/out/hello-193.bin hello.iso
@@ -545,9 +546,16 @@ Things that were wrong in what had been assumed, besides the latch:
    card processors' pins 0x3f, multiplier 3, the second loop 3.000
    times as fast, all as the emulator has them, and their clock
    control register 0x0100 after a reset where the emulator has 0.
-   The bus controller's registers, the ports' directions and the
-   interrupt priorities are in the report too; none of it has been
-   compared with the emulator's models yet.
+   The same program in the emulator, under the unit's boot ROM, now
+   reports the same in all but a handful of its 104 values: the levels
+   of the two CAN transceiver lines and of the watchdog's strobe, which
+   depend on the moment; a register of the clock chip (0x09 on the
+   unit, 0 here); and the card processors' two times, which are
+   0.0035 % longer on the unit, its crystals being what they are.  It
+   took the processor's identification, a few reset values (IPRD,
+   INTMSK00, timers 3 and 4), a DMA control bit that reads as 0, the
+   card processors' clock control register (0x0100 after a reset) and
+   the idle levels of the port pins to get there.
 
 6. **The drive's log, ending in a restart** (`sdk/examples/drive`
    built with `-DRESTART`).  The keys answer (CD EJECT, RETURN), the

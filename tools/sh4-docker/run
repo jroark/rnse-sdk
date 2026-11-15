@@ -1,0 +1,12 @@
+#!/bin/sh
+# Run one tool of the SH-4 GCC in a container, in the current directory.
+# The three commands beside this file are links to it; put this
+# directory on the PATH and sdk/build.sh (and with it the SDK's tests)
+# find a cross compiler:
+#
+#     PATH=$PWD/tools/sh4-docker:$PATH sdk/build.sh 192 hello
+#
+# The image is built from the Dockerfile here the first time.
+here=$(cd "$(dirname "$0")" && pwd)
+docker image inspect rnse-sh4-cross >/dev/null 2>&1 || docker build -q -t rnse-sh4-cross "$here" >&2 || exit 1
+exec docker run --rm -e EXTRA_CFLAGS -v "$PWD":"$PWD" -w "$PWD" rnse-sh4-cross "$(basename "$0")" "$@"
