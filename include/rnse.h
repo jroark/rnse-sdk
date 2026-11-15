@@ -119,6 +119,30 @@ int sd_attach(int slot);
  * register value), the header of the processor's answer and two words
  * of it. */
 extern u16 sd_last[4];
+/* The files of the card's top directory by number, from 0: the name as
+ * the directory has it (eight characters and three, padded, and a
+ * zero) and the size.  Negative past the last. */
+int sd_list(int index, char *name, u32 *size);
+/* An MP3 file of the card's top directory (name as for sd_load), played
+ * by the card processor through its converter.  sd_play starts it;
+ * sd_play_poll, called every few milliseconds, keeps it fed and says 1
+ * while it plays, 0 at its end and negative for an error;
+ * sd_play_stop ends it.  To hear it the amplifier wants the converter
+ * as its source: radio_source(RADIO_DECODER, volume). */
+int sd_play(const char *name);
+int sd_play_poll(void);
+void sd_play_stop(void);
+
+/* The radio processor (192): tuner, amplifier and power.  A command
+ * with its data; the answer's data goes to `answer` and its length is
+ * returned, negative when no answer came in three tries. */
+int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max);
+#define RADIO_CD 1
+#define RADIO_TUNER 3
+#define RADIO_DECODER 4
+/* The amplifier's source and its volume, 0 to 30; the volume alone. */
+int radio_source(int source, int volume);
+int radio_volume(int volume);
 int sd_read(u32 sector, void *buf);
 int sd_load(const char *name, void *to, u32 max, u32 *size);
 

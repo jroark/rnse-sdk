@@ -498,6 +498,11 @@ static int last(u32 c)
 /* The entry of `name` (eleven characters, as in the directory) in a
  * sector of directory entries: its first cluster and size.  1 found, 0
  * not here, 2 the directory ends here. */
+/* (With `listing` not negative it is not a name that is looked for
+ * but the file of that number, whose name is noted.) */
+static int listing = -1;
+static char listed[12];
+
 static int look(const char *name, u32 *cluster, u32 *size)
 {
     int e, i;
@@ -506,8 +511,15 @@ static int look(const char *name, u32 *cluster, u32 *size)
             return 2;
         if (sec[e] == 0xe5 || (sec[e + 11] & 0x18))
             continue;
-        for (i = 0; i < 11 && sec[e + i] == (u8)name[i]; i++)
-            ;
+        if (listing >= 0) {
+            i = listing-- == 0 ? 11 : 0;
+            if (i == 11)
+                for (i = 0; i < 11; i++)
+                    listed[i] = (char)sec[e + i];
+        } else {
+            for (i = 0; i < 11 && sec[e + i] == (u8)name[i]; i++)
+                ;
+        }
         if (i == 11) {
             *cluster = le16(sec + e + 26) | (fat32 ? le16(sec + e + 20) << 16 : 0);
             *size = le32(sec + e + 28);
@@ -517,10 +529,11 @@ static int look(const char *name, u32 *cluster, u32 *size)
     return 0;
 }
 
-int sd_load(const char *name, void *to, u32 max, u32 *size)
+/* The file of that name in the top directory: its first cluster and
+ * its size. */
+static int find(const char *name, u32 *cluster, u32 *size)
 {
-    u32 cluster = 0, s, c, done = 0;
-    u8 *out = to;
+    u32 s, c;
     int r = 0;
     if (mount())
         return -1;
@@ -529,17 +542,39 @@ int sd_load(const char *name, void *to, u32 max, u32 *size)
             for (s = 0; s < per_cluster && r == 0; s++) {
                 if (sd_read(data_start + (c - 2) * per_cluster + s, sec))
                     return -1;
-                r = look(name, &cluster, size);
+                r = look(name, cluster, size);
             }
     } else {
         for (s = 0; s < (root_entries + 15) / 16 && r == 0; s++) {
             if (sd_read(root_start + s, sec))
                 return -1;
-            r = look(name, &cluster, size);
+            r = look(name, cluster, size);
         }
     }
-    if (r != 1)
-        return -2;
+    return r == 1 ? 0 : -2;
+}
+
+int sd_list(int index, char *name, u32 *size)
+{
+    u32 cluster;
+    int r, i;
+    listing = index;
+    r = find("", &cluster, size);
+    listing = -1;
+    if (r)
+        return r;
+    for (i = 0; i < 12; i++)
+        name[i] = listed[i];
+    return 0;
+}
+
+int sd_load(const char *name, void *to, u32 max, u32 *size)
+{
+    u32 cluster = 0, s, c, done = 0;
+    u8 *out = to;
+    int r = find(name, &cluster, size);
+    if (r)
+        return r;
     if (*size > max)
         return -3;
     for (c = cluster; done < *size; c = next_cluster(c)) {
@@ -554,4 +589,170 @@ int sd_load(const char *name, void *to, u32 max, u32 *size)
         }
     }
     return 0;
+}
+
+/* Sound.  The card processor's program is an MP3 player as well: told
+ * where on the card a file's bytes are, it reads them itself, decodes
+ * and sends the samples to its converter.  The host only feeds it the
+ * places, 5000 bytes at a time, each time it asks (0xc701).  These are
+ * the stock driver's messages, as it sends them for a file it plays;
+ * which of the amplifier's inputs the converter is, and how loud, is
+ * the radio processor's business (radio_source). */
+static struct {
+    u32 sector, sectors;
+} extent[48];
+static int extents, playing;
+static u32 play_at, play_size;
+
+static int peek(u16 space, u16 addr, u16 *value)
+{
+    u16 m[4] = { 0x2203, space, addr, 1 }, w;
+    int i;
+    for (i = 0; i < 4; i++)
+        if (put(m[i]))
+            return -1;
+    if (get(&w, 1000) || w != 0xd301 || get(&w, 300) || get(value, 300))
+        return -1;
+    return 0;
+}
+
+static int output(int on)
+{
+    u16 v;
+    if (peek(0, 0x3801, &v))
+        return -1;
+    return poke(0, 0x3801, on ? v | 0x0040 : v & (u16)~0x0040);
+}
+
+int sd_play(const char *name)
+{
+    static const u16 a[] = { 0x3301, 0x0081 }, b[] = { 0x3101, 0x0001 };
+    u32 cluster = 0, c, n = 0;
+    int r;
+    if (slot < 0)
+        return -1;
+    if (playing)
+        sd_play_stop();
+    /* (The stock driver gives places in bytes; what it gives for a
+     * card that counts in sectors has not been seen.) */
+    if (high_capacity)
+        return -20;
+    r = find(name, &cluster, &play_size);
+    if (r)
+        return r;
+    extents = 0;
+    for (c = cluster; n < play_size; c = next_cluster(c)) {
+        u32 at;
+        if (last(c))
+            return -4;
+        at = data_start + (c - 2) * per_cluster;
+        if (extents && extent[extents - 1].sector + extent[extents - 1].sectors == at) {
+            extent[extents - 1].sectors += per_cluster;
+        } else {
+            if (extents == (int)(sizeof extent / sizeof extent[0]))
+                return -21; /* in more pieces than there is room to note */
+            extent[extents].sector = at;
+            extent[extents++].sectors = per_cluster;
+        }
+        n += per_cluster * 512;
+    }
+    if (output(1) || say(a, 2) || say(b, 2) || poke(0, 0x0a5c, 0))
+        return -22;
+    if (put(0x3400) || answer(0, 0, 1000) != 0xf000)
+        return -22;
+    play_at = 0;
+    playing = 1;
+    return 0;
+}
+
+/* The next place, when the processor asks for one. */
+static int feed(void)
+{
+    static const u16 more[] = { 0x0401, 0x0001 };
+    u32 at = play_at, len, left, addr = 0;
+    u16 m[8] = { 0 };
+    int i;
+    if (play_at >= play_size) {
+        /* Nothing more: it plays out what it has and says 0xc400. */
+        if (put(0x0401) || put(0x0000) || answer(0, 0, 1000) != 0xf000)
+            return -23;
+        return 0;
+    }
+    for (i = 0; i < extents; i++) {
+        if (at < extent[i].sectors * 512) {
+            addr = extent[i].sector * 512 + at;
+            break;
+        }
+        at -= extent[i].sectors * 512;
+    }
+    if (i == extents)
+        return -23;
+    left = extent[i].sectors * 512 - at;
+    len = play_size - play_at;
+    if (len > 5000)
+        len = 5000;
+    if (len > left)
+        len = left;
+    if (say(more, 2))
+        return -23;
+    m[0] = (u16)(addr >> 16);
+    m[1] = (u16)addr;
+    m[2] = (u16)(len >> 16);
+    m[3] = (u16)len;
+    for (i = 0; i < 8; i++)
+        if (put(m[i]))
+            return -23;
+    play_at += len;
+    return 0;
+}
+
+int sd_play_poll(void)
+{
+    static const u16 done[] = { 0x3901, 0x0000 };
+    u16 head, w;
+    int i, r;
+    if (!playing)
+        return 0;
+    while (!(REG8(STATUS) & (slot ? 1 : 4))) {
+        if (get(&head, 100))
+            break;
+        if (head == 0xc701) {
+            if (get(&w, 300))
+                return -23;
+            r = feed();
+            if (r) {
+                playing = 0;
+                return r;
+            }
+        } else if (head == 0xc400 || head == 0xc500) {
+            /* Played to the end; or the decoder gave up. */
+            playing = 0;
+            say(done, 2);
+            output(0);
+            return head == 0xc400 ? 0 : -24;
+        } else {
+            for (i = 0; i < (head & 0xff); i++)
+                if (get(&w, 300))
+                    break;
+        }
+    }
+    return 1;
+}
+
+void sd_play_stop(void)
+{
+    u16 w;
+    int i;
+    if (!playing)
+        return;
+    playing = 0;
+    /* As the stock driver stops a file in the middle.  (A request for
+     * more may be on its way at that moment: whatever comes is taken
+     * until the "done".) */
+    if (put(0x3500))
+        return;
+    for (i = 0; i < 16; i++)
+        if (get(&w, 500) || w == 0xf000)
+            break;
+    output(0);
 }

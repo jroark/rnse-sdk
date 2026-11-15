@@ -204,6 +204,25 @@ things a unit taught on the way:
 What has not run on a unit: a high-capacity card, FAT12 and FAT32 (in the emulator each reads a card
 image formatted by macOS).
 
+### Sound
+
+`sd_play` has the card processor play an MP3 file of the card: the
+processor's program is the stock software's player, and it is told
+where the file's bytes are as the stock driver tells it
+(`docs/hardware.md`, "Messages").  `sd_play_poll` keeps it fed.  The
+sound comes out of the processor's converter, and whether that is
+heard is the radio processor's business, which has the amplifier:
+`radio_source(RADIO_DECODER, volume)` and `radio_volume`
+(`sdk/src/radio.c`, the frames the stock software sends for the
+same).  `sdk/examples/player` is a player made of the two with the
+faceplate's keys and knobs.  In the emulator it plays the test file's
+two tones out of the speaker at the right pitch on the right sides
+and the volume knob moves the amplifier (`tests/disc.rs`,
+`sdk_player_plays_an_mp3`).  On a unit none of it has run: the
+emulator's radio processor is a stand-in that takes the frames, and
+what a real one wants besides (a mute, a power state) is not known.
+Standard cards only.
+
 `sdk/examples/timing` is a row of measurements made to come from a
 card: the display's vertical syncs, what a sector from each card takes,
 and the time of an access to each part of the bus.  No hands wanted; it
