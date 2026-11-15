@@ -26,19 +26,58 @@ u32 umod(u32 a, u32 b)
     return a - udiv(a, b) * b;
 }
 
-/* The compiler may call these on its own. */
-void *memset(void *d, int c, unsigned long n)
+/* The compiler may call these on its own, and code from elsewhere
+ * (third_party) leans on them: a long word at a time where the
+ * addresses allow, eight to a round.  (The attribute keeps GCC from
+ * turning the loops back into calls of memset and memcpy.) */
+#define NO_LIBCALLS __attribute__((optimize("no-tree-loop-distribute-patterns")))
+
+NO_LIBCALLS void *memset(void *d, int c, unsigned long n)
 {
     u8 *p = d;
+    while (n && ((u32)p & 3)) {
+        *p++ = (u8)c;
+        n--;
+    }
+    if (n >= 4) {
+        u32 w = (u8)c * 0x01010101u, *q = (u32 *)p;
+        for (; n >= 32; n -= 32, q += 8) {
+            q[0] = w, q[1] = w, q[2] = w, q[3] = w;
+            q[4] = w, q[5] = w, q[6] = w, q[7] = w;
+        }
+        for (; n >= 4; n -= 4)
+            *q++ = w;
+        p = (u8 *)q;
+    }
     while (n--)
         *p++ = (u8)c;
     return d;
 }
 
-void *memcpy(void *d, const void *s, unsigned long n)
+NO_LIBCALLS void *memcpy(void *d, const void *s, unsigned long n)
 {
     u8 *p = d;
     const u8 *q = s;
+    if ((((u32)p ^ (u32)q) & 3) == 0) {
+        while (n && ((u32)p & 3)) {
+            *p++ = *q++;
+            n--;
+        }
+        {
+            u32 *pw = (u32 *)p;
+            const u32 *qw = (const u32 *)q;
+            for (; n >= 32; n -= 32, pw += 8, qw += 8) {
+                u32 a = qw[0], b = qw[1], c = qw[2], e = qw[3];
+                pw[0] = a, pw[1] = b, pw[2] = c, pw[3] = e;
+                a = qw[4], b = qw[5], c = qw[6], e = qw[7];
+                pw[4] = a, pw[5] = b, pw[6] = c, pw[7] = e;
+            }
+            for (; n >= 4; n -= 4)
+                *pw++ = *qw++;
+            p = (u8 *)pw;
+            q = (const u8 *)qw;
+        }
+    }
     while (n--)
         *p++ = *q++;
     return d;

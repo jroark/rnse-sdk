@@ -504,9 +504,36 @@ Not in the kit: sound.  On the 192 it is behind the two signal
 processors of the card board, like the SD cards, which the kit does
 read: see "Programs from an SD card".
 
-There is no C library.  The compiler's own support routines are not
-there either, so `/` and `%` on variables will not link: use `udiv` and
-`umod`.  Floating point is switched off (`-m4-nofpu`).
+There is no C library.  What the compiler calls on its own is in
+`sdk/src/libgcc.S` (division, and the block copy it uses for large
+structures; the SH-4 cross compilers that are easy to get are
+little-endian, so their libgcc cannot be linked), so `/` and `%` work;
+`udiv` and `umod` are still there.  `memset` and `memcpy` move a long
+word at a time where they can.  `malloc` hands out pieces of a block of
+RAM the program gives to `heap_init` (`sdk/src/heap.c`) and `free` gives
+nothing back.  Floating point is switched off (`-m4-nofpu`).
+
+Code from elsewhere goes in `sdk/third_party/NAME/`, with its licence;
+an example that uses it names it in a file `libs` beside its sources,
+and `build.sh` compiles every `.c` of it with `-O2` and the few C
+library headers in `sdk/third_party/libc`.  So far there is one,
+`h264bsd`, an H.264 decoder (see `docs/android-auto.md`).
+
+A program that computes much should set the caches up for itself:
+the stock setting the program finds (CCR 0x80008181) writes every store
+through P1, where the program, its data and its stack are, straight to
+memory, and gives code and data within one 32 MB half of each cache.
+`cache_setup(CCR_EMODE | CCR_ICE | CCR_OCE | CCR_CB)` (`sdk/src/cache.S`)
+writes the operand cache back and changes that safely; on the 192 it
+made the H.264 decoder of `sdk/examples/h264bench` two to three times
+as fast (`docs/android-auto.md`).  With P1 copy-back, data the program
+hands to a device by DMA has to be written back first (`ocbwb`), as it
+already must through P0.
+
+`rnse boot ... --profile FILE` samples where the CPU is every 20,000
+cycles; `tools/profile.py sdk/out/NAME-192.elf FILE` adds the samples up
+by function.  It counts instructions, as the emulator does, not time on
+a unit.
 
 ## A report from a unit, and its boot ROM
 

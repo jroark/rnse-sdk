@@ -26,11 +26,30 @@ objdir=out/objects-$example-$unit
 mkdir -p "$objdir"
 # EXTRA_CFLAGS: for instance -DWAIT=5 for the probe.
 cflags="-g -mb -m4-nofpu -Os -ffreestanding -fno-builtin -fno-pic -fno-stack-protector -Wall -Wextra -Iinclude $EXTRA_CFLAGS"
+# An example that uses code of third_party/ (its file `libs`, below)
+# sees that code's headers.
+libs=""
+[ -f examples/$example/libs ] && libs=$(cat examples/$example/libs)
+for lib in $libs; do
+    cflags="$cflags -Ithird_party/$lib"
+done
+[ -n "$libs" ] && cflags="$cflags -Ithird_party/libc"
 objs=""
-for src in src/crt0.S src/common.c src/panel.c src/display.c src/cd.c src/can.c src/sd.c src/radio.c src/flash.c src/wayback.c src/hw$unit.c examples/$example/*.c; do
+for src in src/crt0.S src/common.c src/heap.c src/libgcc.S src/cache.S src/panel.c src/display.c src/cd.c src/can.c src/sd.c src/pcm.c src/radio.c src/flash.c src/wayback.c src/hw$unit.c examples/$example/*.c; do
     obj=$objdir/$(basename "$src" | sed 's/\.[cS]$/.o/')
     ${CROSS}gcc $cflags -c -o "$obj" "$src"
     objs="$objs $obj"
+done
+# Code from elsewhere that an example names in its file `libs`, one
+# directory of third_party/ a line, built for speed and with the few C
+# library headers it wants from third_party/libc.
+for lib in $libs; do
+    for src in third_party/$lib/*.c; do
+        obj=$objdir/$lib-$(basename "$src" .c).o
+        ${CROSS}gcc -g -mb -m4-nofpu -O2 -ffreestanding -fno-builtin -fno-pic -fno-stack-protector \
+            -Ithird_party/libc -Ithird_party/$lib $EXTRA_CFLAGS -c -o "$obj" "$src"
+        objs="$objs $obj"
+    done
 done
 ${CROSS}ld -EB --no-warn-rwx-segments -T link.ld --defsym LOAD=$load --defsym SIZE=$size -o out/$example-$unit.elf $objs
 ${CROSS}objcopy -O binary out/$example-$unit.elf out/$example-$unit.bin
