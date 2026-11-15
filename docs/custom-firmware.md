@@ -305,9 +305,16 @@ vouch for:
   flash is done at once, a real sector takes a quarter of a second and
   answers with its status meanwhile, which the routine waits out
   without ever having seen it.
-* The guard's cell.  That the battery-backed memory is there at
-  0x3ff00 and keeps what is written is by the part's size and by what
-  the stock software uses, not by a write.
+* The guard's cell is no longer among them: `sdk/examples/preflight`,
+  from a card, wrote a count next to it (0x3ff10) on a unit and found
+  it again one higher at every run, three times through a restart
+  with the stock software running in between and once through the
+  power being off.  The guard's own three words read the same
+  arbitrary values each time (0x01222fd7, 0x0b827ffe, 0x0b02ef2b):
+  memory nobody has written, by the look of it, which the guard takes
+  for "no count yet".  The flash chips gave their identity to the
+  erase's first commands from a program's place (maker 4, device
+  0x227e, both).
 * What the hardware wants at a start without the stock software.  A
   program from a disc or a card finds the radio processor, the
   faceplate controller and the card processors as that software left
