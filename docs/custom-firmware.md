@@ -139,15 +139,43 @@ the flash holds.  `tools/dsp-recipe.py` makes the table by which the
 download is put together from the flash, out of a trace of the stock
 driver (`rnse boot --sd-card ... --trace-dsp`) and a flash image, and
 checks that the table rebuilds every word; another software needs its
-own table.  `sd_read` reads a sector, `sd_load` a file from a FAT16 or
-FAT32 card, `run_image` starts an image in the running program's place.
+own table.  `run_image` starts an image in the running program's place.
+
+`sd_read` reads a sector, `sd_load` a file from a FAT12, FAT16 or FAT32
+card.
 
 In the emulator all of it runs, both slots, with the stock software and
 a unit's boot ROM at both ends (`tests/disc.rs`,
-`programs_come_from_an_sd_card`).  None of it has run on a unit.  What
-the emulator cannot vouch for: the times a real card processor and a
-real card take, a high-capacity card, and FAT32, for which the
-emulator has no card.
+`programs_come_from_an_sd_card`).  On a unit (a North American 192
+with software 0371, a 32 MB card formatted FAT16 by macOS, first slot)
+it has run as far as this: the card processor took its program, the
+card started in 3.99 s, the file was found and read in 40 ms and the
+program ran from it and restarted the unit when it was done.  Three
+things a unit taught on the way:
+
+- **A card's start wants the stock driver's pace.**  That driver leaves
+  150 ms between any two steps.  With the steps one behind the other
+  the card processor reported the first application command as
+  unanswered, in both slots (the same answer an empty slot gives), and
+  with the pace the same card started.  Which step it was that needed
+  the time was not looked for.
+- **A card that does not answer CMD8** (version 1 of the specification,
+  as small old cards are) is asked ACMD41 without the claim to know
+  high-capacity cards, again and again until it is ready.  The
+  emulator's card can be one (`--sd-old`).
+- **A loader must leave the faceplate controller alone, or go on
+  talking to it.**  The screen's light is the controller's.  A loader
+  that started the controller anew (`panel_init`) and then read a card
+  for four seconds without `panel_poll` handed a dark screen to a
+  program that draws and never talks to the controller: the unit
+  showed nothing for the program's whole run.  The emulator shows the
+  same, and the test looks at the screen now.  `sdboot` starts the
+  controller only when it has found nothing and wants the keys.
+
+What has not run on a unit: the second slot with a card that starts, a
+high-capacity card, FAT12 and FAT32 (in the emulator each reads a card
+image formatted by macOS), and the round from a program's restart back
+into the loader more than once.
 
 ## Building and running
 

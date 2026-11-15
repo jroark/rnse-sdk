@@ -71,7 +71,11 @@ int main(void)
     screen_palette(1, 255, 255, 255);
     screen_palette(2, 255, 96, 0);
     screen_text(8 * s, 6 * s, "PROGRAMS FROM AN SD CARD", 2, 2 * s);
-    panel_init();
+    /* The faceplate controller is left as the installed software has
+     * it, lighting and all, for the program that comes: started anew
+     * here and then not talked to while the card is read, it would
+     * have no settings and the screen no light (which is what a unit
+     * showed).  It is started below, when its keys are wanted. */
     can_init();
     for (slot = 0; slot < 2 && r; slot++) {
         u32 t = millis();
@@ -87,6 +91,8 @@ int main(void)
         }
         t = millis();
         r = sd_load("RNSE    BIN", image, 0x100000, &size);
+        if (r == 0 && size > 0x1c000)
+            r = -3; /* more than the 192's place for a program holds */
         record((u8)(2 + slot), (u32)r, millis() - t);
         if (r)
             number("  NO RNSE.BIN:", r);
@@ -95,11 +101,12 @@ int main(void)
         record(0x21, size, 0);
         number("RNSE.BIN, BYTES:", (int)size);
         say("STARTING IT", 2);
-        delay_ms(1500);
+        delay_ms(500);
         r = run_image(image, size);
         number("NOT A PROGRAM FOR THIS PLACE:", r);
     }
     say("SETUP: STOCK UPDATE  RETURN: RESTART", 2);
+    panel_init();
     start = millis();
     for (;;) {
         panel_poll();

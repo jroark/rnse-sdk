@@ -18,7 +18,8 @@
  * that it rebuilds every word); sd_init looks for the program's
  * header first and gives up on a unit that has other software.
  *
- * Reading only.  Standard and high-capacity cards. */
+ * Reading only.  Standard and high-capacity cards; FAT12, FAT16 and
+ * FAT32. */
 #include "rnse.h"
 
 #define STATUS 0xb2400001 /* bits 2, 0: nothing to read; 3, 1: cannot write */
@@ -336,7 +337,7 @@ int sd_read(u32 sector, void *buf)
 
 static u8 sec[512];
 static u32 fat_start, data_start, root_start, root_entries, per_cluster;
-static int fat32;
+static int fat32, fat12;
 
 static u32 le16(const u8 *p) { return (u32)(p[0] | p[1] << 8); }
 static u32 le32(const u8 *p) { return le16(p) | le16(p + 2) << 16; }
@@ -369,6 +370,7 @@ static int mount(void)
     data_start = root_start + (root_entries * 32 + 511) / 512;
     clusters = udiv(total - (data_start - first), per_cluster);
     fat32 = clusters >= 65525;
+    fat12 = clusters < 4085;
     if (fat32)
         root_start = le32(sec + 44); /* a cluster, not a sector */
     return 0;
@@ -376,15 +378,26 @@ static int mount(void)
 
 static u32 next_cluster(u32 c)
 {
-    u32 at = fat32 ? c * 4 : c * 2;
+    u32 at = fat32 ? c * 4 : fat12 ? c + c / 2 : c * 2, v;
     if (sd_read(fat_start + at / 512, sec))
         return 0xffffffff;
-    return fat32 ? le32(sec + (at & 511)) & 0x0fffffff : le16(sec + (at & 511));
+    if (!fat12)
+        return fat32 ? le32(sec + (at & 511)) & 0x0fffffff : le16(sec + (at & 511));
+    /* Twelve bits, which may lie across two sectors. */
+    v = sec[at & 511];
+    if ((at & 511) == 511) {
+        if (sd_read(fat_start + at / 512 + 1, sec))
+            return 0xffffffff;
+        v |= (u32)sec[0] << 8;
+    } else {
+        v |= (u32)sec[(at & 511) + 1] << 8;
+    }
+    return c & 1 ? v >> 4 : v & 0xfff;
 }
 
 static int last(u32 c)
 {
-    return c < 2 || c >= (fat32 ? 0x0ffffff8u : 0xfff8u);
+    return c < 2 || c >= (fat32 ? 0x0ffffff8u : fat12 ? 0xff8u : 0xfff8u);
 }
 
 /* The entry of `name` (eleven characters, as in the directory) in a
