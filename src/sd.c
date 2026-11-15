@@ -187,7 +187,7 @@ static int download(void)
     return 0;
 }
 
-int sd_init(int which)
+static int start_once(int which)
 {
     static const u16 start[] = { 0x1202, 0xd762, 0x0034 };
     static const u16 a[] = { 0x7301, 0x0002 }, b[] = { 0x3301, 0x0001 }, c[] = { 0x3101, 0x0001 };
@@ -301,6 +301,18 @@ int sd_init(int which)
     if (put(g[0]) || answer(r, 9, 1000) < 0)
         return -11;
     return 0;
+}
+
+/* Twice: a unit had a card (512 MB) that left the first application
+ * command unanswered, and whether it only wants a second go is what
+ * the second go finds out.  Not for the failures that are not the
+ * card's. */
+int sd_init(int which)
+{
+    int r = start_once(which);
+    if (r <= -6)
+        r = start_once(which);
+    return r;
 }
 
 int sd_read(u32 sector, void *buf)

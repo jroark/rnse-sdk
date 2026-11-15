@@ -147,10 +147,19 @@ card.
 In the emulator all of it runs, both slots, with the stock software and
 a unit's boot ROM at both ends (`tests/disc.rs`,
 `programs_come_from_an_sd_card`).  On a unit (a North American 192
-with software 0371, a 32 MB card formatted FAT16 by macOS, first slot)
-it has run as far as this: the card processor took its program, the
-card started in 3.99 s, the file was found and read in 40 ms and the
-program ran from it and restarted the unit when it was done.  Three
+with software 0371, a 32 MB card formatted FAT16 by macOS, in either
+slot) it runs: the card processor takes its program, the card starts in
+4.0 s, the file is found and read in 40 ms, the program runs from it
+with its picture on the screen, restarts the unit when it is done, and
+the stock software starts the loader again 46 s later: 62.7 s a round
+with a program that shows itself for ten seconds, round after round
+with nobody touching the unit.
+
+A 512 MB card did not start on that unit, in the first slot, twice: no
+answer to the first application command (CMD55) after CMD8 went
+unanswered as well, where the 32 MB card answers.  Whether the stock
+software reads that card is not known, nor what it wants; `sd_init`
+tries a card twice since.  Three
 things a unit taught on the way:
 
 - **A card's start wants the stock driver's pace.**  That driver leaves
@@ -172,10 +181,8 @@ things a unit taught on the way:
   same, and the test looks at the screen now.  `sdboot` starts the
   controller only when it has found nothing and wants the keys.
 
-What has not run on a unit: the second slot with a card that starts, a
-high-capacity card, FAT12 and FAT32 (in the emulator each reads a card
-image formatted by macOS), and the round from a program's restart back
-into the loader more than once.
+What has not run on a unit: a high-capacity card, FAT12 and FAT32 (in the emulator each reads a card
+image formatted by macOS).
 
 ## Building and running
 
