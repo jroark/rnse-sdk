@@ -191,6 +191,11 @@ things a unit taught on the way:
 What has not run on a unit: a high-capacity card, FAT12 and FAT32 (in the emulator each reads a card
 image formatted by macOS).
 
+`sdk/examples/timing` is a row of measurements made to come from a
+card: the display's vertical syncs, what a sector from each card takes,
+and the time of an access to each part of the bus.  No hands wanted; it
+restarts the unit when it is done.
+
 ## Building and running
 
 You need an SH-4 GCC that can produce big-endian code without its
