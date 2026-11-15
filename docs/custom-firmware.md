@@ -575,10 +575,12 @@ Things that were wrong in what had been assumed, besides the latch:
    it is told to start, which the stock software does and the SDK did
    not (`docs/boot-rom.md`).  `cd_wait_ready` sends the command now,
    as the stock software does, whenever the drive is not ready with a
-   disc in it; that has run in the emulator only.
+   disc in it; that has run in the emulator only.  The command itself
+   works from a program: sent by a key of the drive's log, it had the
+   drive ready 5.65 s later.
 
-Not tried on the unit: the knobs, receiving on CAN, the drive's start
-command from a program.
+Not tried on the unit: the knobs, receiving on CAN, reading after a
+disc has been changed.
 
 ## What this does and does not establish
 
