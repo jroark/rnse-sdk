@@ -626,7 +626,17 @@ Things that were wrong in what had been assumed, besides the latch:
    did not answer the two questions, which were put to a receiver that
    had stopped at an overrun: the program clears that now.
 
-Not tried on the unit: receiving on CAN; the radio processor's answers.
+10. **The suite once more**, with prompts that can be seen.  The radio
+    processor's version and its status block (`docs/hardware.md`,
+    "Radio/audio processor"); the second card slot's switch, bit 0 of
+    port 6, as the emulator has it; and the whole of the battery-backed
+    memory but for some 350 pieces of five bytes that were lost on the
+    way.  `rnse boot --nvram FILE` starts the emulator with it: the
+    installed software then finds its settings as that unit left them
+    instead of an empty memory to initialise.  Such an image is as
+    private as the unit's owner: destinations, the car's number.
+
+Not tried on the unit: receiving on CAN.
 
 ## What this does and does not establish
 
