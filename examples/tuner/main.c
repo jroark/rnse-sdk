@@ -71,6 +71,7 @@ int main(void)
 {
     u8 status[64];
     u32 changed = 0;
+    int ask = 0;
     int n, i, r, was[2] = { 0 };
     board_init();
     console_puts("\nrnse sdk: tuner\n");
@@ -112,7 +113,8 @@ int main(void)
             rec(1, (u32)frequency, (u32)(radio_answered << 8) | (u32)(r & 0xff));
             console_puts(r ? "tune: no answer\n" : "tuned\n");
             show(r ? "NOT ANSWERED" : radio_answered == 0x20 ? "ACKNOWLEDGED" : "ANSWERED");
-            changed = millis() | 1;
+            changed = millis();
+            ask = 1;
         }
         turn = panel_knob(KNOB_VOLUME);
         if (turn) {
@@ -121,8 +123,8 @@ int main(void)
             rec(3, (u32)volume, (u32)radio_volume(volume));
             show("");
         }
-        if (changed && millis() - changed > 1000) {
-            changed = 0;
+        if (ask && millis() - changed > 1000) {
+            ask = 0;
             n = radio_status(status, sizeof status);
             rec(2, n >= 8 ? (u32)status[4] << 24 | (u32)status[5] << 16 | (u32)status[6] << 8 | status[7] : 0xffffffff, (u32)n);
         }

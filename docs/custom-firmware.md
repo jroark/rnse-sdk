@@ -237,6 +237,11 @@ light.  The stock driver takes the processor's words in an interrupt.
 The SDK's now takes what is there to read whenever it waits to write
 (`put` in `sdk/src/sd.c`), and that was all it wanted.
 
+The tuner is the radio processor's too: `radio_tune` sends it to a
+frequency, and `sdk/examples/tuner` is a radio made of that, the
+source and the volume.  On the unit it is heard, and tunes: the radio
+processor acknowledges each frequency.
+
 `sdk/examples/timing` is a row of measurements made to come from a
 card: the display's vertical syncs, what a sector from each card takes,
 and the time of an access to each part of the bus.  No hands wanted; it
