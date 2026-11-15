@@ -30,7 +30,7 @@
  *    8  the CAN controller's status and error counters (192)
  *    9  thirty seconds for hands: every change of the keys (item 0:
  *       four bytes of them and two more) and the two knobs' counts
- *       (1, 2).  RETURN ends it early.
+ *       (1, 2).  RETURN ends it early, after three seconds.
  *       With them, in the same thirty seconds: every change of a
  *       port's pins (3: port, data), of the processor's port A (4) and,
  *       by more than 16, of an A/D input (5: input, reading), for
@@ -54,13 +54,14 @@
  *   15  the bus: microseconds for 8192 words of the flash through the
  *       cache (0) and past it (1), and of the battery-backed memory (2)
  *   16  the GPS baseband's registers, read (192)
- *   17  a disc change, if CD EJECT is pressed within fifteen seconds:
+ *   17  a disc change, if CD EJECT is pressed within fifteen seconds
+ *       (SETUP leaves it out at once):
  *       the disc comes out and is waited for for a minute; then the
  *       milliseconds until the SDK's cd_wait_ready has the drive
  *       ready (item 0, with its result) and 64 sectors read (1)
  *   18  the battery-backed memory, all that the stock software uses of
  *       it, on frames 0x7F9: three bytes of address, five of data.
- *       Three minutes; RETURN held down skips the rest
+ *       Three minutes; SETUP skips the rest
  *   10  the watchdog: its strobe is left alone and a record follows
  *       every 10 ms with the milliseconds since, until the unit is
  *       reset.  Without a reset in ten seconds the unit is restarted.
@@ -73,7 +74,7 @@
 #include "rnse.h"
 
 #ifndef HANDS
-#define HANDS 30
+#define HANDS 45
 #endif
 
 static int s, row;
@@ -114,8 +115,30 @@ static void show(const char *text)
     screen_text(2 * s, y, text, 1, s);
     console_puts(text);
     console_puts("\n");
-    if (++row >= 25)
+    if (++row >= 22)
         row = 1;
+}
+
+/* A phase that wants hands says so where it cannot be missed: across
+ * the bottom of the screen, with the seconds that are left. */
+static void prompt(const char *text, u32 seconds)
+{
+    static u32 shown = 0xffffffff;
+    static const char *what;
+    char line[48], *p = line;
+    int y = screen_height - 28 * s;
+    if (text == what && seconds == shown)
+        return;
+    what = text;
+    shown = seconds;
+    screen_fill(0, y - 2 * s, screen_width, 30 * s, text ? 2 : 0);
+    if (!text)
+        return;
+    screen_text(4 * s, y, text, 3, 2 * s);
+    p = put_dec(p, seconds);
+    p = put_str(p, " S LEFT");
+    *p = 0;
+    screen_text(4 * s, y + 16 * s, line, 3, s);
 }
 
 static void rec(u8 test, u8 item, u32 value, u32 second)
@@ -365,6 +388,7 @@ static void hands(void)
     open(9, "KEYS AND KNOBS: PRESS, TURN.  RETURN ENDS");
     while (millis() - start < HANDS * 1000u) {
         u32 now = 0, now2 = 0;
+        prompt("KEYS, KNOBS, CARDS: NOW", HANDS - udiv(millis() - start, 1000));
         panel_poll();
         for (k = 0; k < 32; k++)
             now |= (u32)(panel_key(k) != 0) << k;
@@ -389,7 +413,7 @@ static void hands(void)
             rec(9, 2, (u32)select, 0);
             result("SELECT KNOB", (u32)select, 1);
         }
-        if (panel_key(KEY_RETURN))
+        if (panel_key(KEY_RETURN) && millis() - start > 3000)
             break;
         if (screen_width == 400 && millis() - looked >= 100) {
             looked = millis();
@@ -426,6 +450,7 @@ static void hands(void)
         }
         cpu_idle();
     }
+    prompt(0, 0);
 }
 
 /* Bytes as records: four in the value, the count so far in the second. */
@@ -447,6 +472,10 @@ static void rec_bytes(u8 test, u8 first, const u8 *b, u32 n)
 static u32 listen(int ch, u8 *out, u32 max, u32 ms, u32 quiet)
 {
     u32 start = millis(), last = start, n = 0;
+    /* A receiver that has overrun (its 32 bytes were full: the
+     * installed software's interrupt is not there to empty it) hears
+     * nothing more until its error flags are taken back. */
+    REG16(UART(ch) + 0x08) = REG16(UART(ch) + 0x08) & 0xffc7;
     while (millis() - start < ms && n < max) {
         if (REG16(UART(ch) + 0x08) & 0x0040) {
             out[n++] = (u8)REG16(UART(ch) + 0x0a);
@@ -612,8 +641,10 @@ static void disc_change(void)
     int r;
     open(17, "A DISC CHANGE: CD EJECT WITHIN 15 S, OR NOT");
     while (!panel_key(KEY_CD_EJECT)) {
+        prompt("CD EJECT FOR A DISC CHANGE", 15 - udiv(millis() - start, 1000));
         panel_poll();
-        if (millis() - start > 15000 || panel_key(KEY_RETURN)) {
+        if (millis() - start > 15000 || panel_key(KEY_SETUP)) {
+            prompt(0, 0);
             rec(17, 255, 0, 0);
             show("   LEFT OUT");
             return;
@@ -622,6 +653,7 @@ static void disc_change(void)
     }
     cd_command(allow_removal, 0, 0);
     cd_command(eject, 0, 0);
+    prompt("TAKE THE DISC, PUSH IT BACK", 80);
     show("   TAKE THE DISC, PUSH IT BACK IN");
     /* Out: no medium.  Then in again: anything else. */
     start = millis();
@@ -636,9 +668,11 @@ static void disc_change(void)
         }
         delay_ms(100);
     }
+    prompt("WAITING FOR THE DRIVE", 40);
     t = millis();
     r = cd_wait_ready(40000);
     t = millis() - t;
+    prompt(0, 0);
     rec(17, 0, t, (u32)r);
     result("READY AFTER MS", t, 0);
     t = r ? 0xffffffff : timed_read(16, 64);
@@ -650,16 +684,18 @@ static void memory_dump(void)
 {
     const u8 *m = (const u8 *)0xb0000000;
     u32 at, size = 0x3f640;
-    open(18, "BATTERY-BACKED MEMORY, 3 MIN.  RETURN SKIPS");
+    open(18, "BATTERY-BACKED MEMORY, 3 MIN.  SETUP SKIPS");
     for (at = 0; at < size; at += 5) {
         u8 d[8] = { (u8)(at >> 16), (u8)(at >> 8), (u8)at, m[at], m[at + 1], m[at + 2], m[at + 3], m[at + 4] };
         can_send_for(0x7f9, d, 8, 3000);
         if ((at & 0xfff) < 5) {
+            prompt("SENDING MEMORY: HANDS OFF", udiv((size - at) * 4, 1000));
             panel_poll();
-            if (panel_key(KEY_RETURN))
+            if (panel_key(KEY_SETUP))
                 break;
         }
     }
+    prompt(0, 0);
     rec(18, 0, at, size);
     result("BYTES SENT", at, 0);
 }
@@ -689,6 +725,8 @@ int main(void)
     console_puts("\nrnse sdk: suite\n");
     s = screen_width / 400;
     screen_palette(1, 255, 255, 255);
+    screen_palette(2, 200, 40, 0);
+    screen_palette(3, 255, 255, 255);
     can_init();
     show("RNSE SDK: SUITE.  RESULTS ON CAN 7F8");
     speed();

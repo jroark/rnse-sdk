@@ -612,8 +612,21 @@ Things that were wrong in what had been assumed, besides the latch:
    block as it really is.  Every key and both knobs answered, with the
    SDK's numbers for them.
 
-Not tried on the unit: receiving on CAN, `cd_wait_ready` after a disc
-has been changed.
+9. **The suite, eighteen tests.**  `cd_wait_ready` after a disc change:
+   ready 7.7 s after the disc was back, 64 sectors read after it.  The
+   flash chips' own account of themselves (`docs/hardware.md`, "The
+   boards"), which gives the times an erase and a write take without
+   erasing anything.  Only three serial channels are in use.  Reading
+   8192 words takes 1.06 ms from the flash through the cache, 1.40 ms
+   past it and 6.0 ms from the battery-backed memory, which is slow.
+   A card pushed into the first slot shows as bit 6 of port 2, as the
+   emulator has it; the display open reads 47 on A/D input 3 and 0 on
+   bit 2 of port 3, likewise.  The first 60 KiB of the battery-backed
+   memory came out before a key cut it short.  The radio processor
+   did not answer the two questions, which were put to a receiver that
+   had stopped at an overrun: the program clears that now.
+
+Not tried on the unit: receiving on CAN; the radio processor's answers.
 
 ## What this does and does not establish
 
