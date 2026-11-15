@@ -143,3 +143,41 @@ int stock_update(void)
     ((void (*)(u32, u32, u32, u32))(u32)stub)((u32)loader, UNCACHED(_load), (length + 3) >> 2, (u32)params);
     return -3; /* not reached */
 }
+
+/* Another program in this one's place: `image` is what build.sh makes
+ * (out/<example>-<unit>.bin, the image from the module's entry points
+ * on), `bytes` long, somewhere in RAM outside the program's place.  It
+ * is copied over this program and started as this one was, with the
+ * same arguments, by the few instructions that also start the stock
+ * loader; and it is told where the packed stock loader is, which stays
+ * where `rnse custom` put it, so that its stock_update works as this
+ * one's would.  Returns only when the image cannot be one. */
+int run_image(void *image, u32 bytes)
+{
+    volatile u32 *stub = (volatile u32 *)UNCACHED(way_back_scratch);
+    volatile u32 *params = (volatile u32 *)UNCACHED(way_back_scratch + 0x800);
+    u32 *words = image;
+    u32 i, n;
+
+    if (bytes < 0x20 || (words[0] & 0xfff00000) != ((u32)_load & 0xfff00000))
+        return -1; /* its entry point is not in the loader's place */
+    words[5] = way_back_offset[0];
+    words[6] = way_back_offset[1];
+    irq_disable();
+    n = (u32)(way_back_stub_end - way_back_stub);
+    for (i = 0; i < n; i++)
+        stub[i] = way_back_stub[i];
+    params[0] = (u32)_load;
+    params[1] = (0x80 + bytes + 31) >> 5;
+    params[2] = words[0];
+    params[3] = words[2];
+    params[4] = start_args[0];
+    params[5] = start_args[1];
+    params[6] = start_args[2];
+    params[7] = way_back_scratch - 16;
+    params[8] = way_back_strobe;
+    params[9] = way_back_marker;
+    params[10] = way_back_marker ? (u32)(REG8(way_back_marker) | 0x0c) : 0;
+    ((void (*)(u32, u32, u32, u32))(u32)stub)((u32)image, UNCACHED(_load) + 0x80, (bytes + 3) >> 2, (u32)params);
+    return -3; /* not reached */
+}

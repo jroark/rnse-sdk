@@ -100,6 +100,21 @@ int cd_read(u32 sector, u32 count, void *buf);
  * upper case without the version (";1").  0 = found. */
 int cd_find(const char *name, u32 *sector, u32 *size);
 
+/* SD cards (192, with the North American software 0371 installed: the
+ * card processors run that software's program, taken from the unit's
+ * flash; see src/sd.c).  sd_init starts the processor of a slot (0 or
+ * 1) and the card in it; 0, or what went wrong: -1 no such thing on
+ * this unit, -2 other software in the flash, -3 the processor did not
+ * take its program, -4 and below the card's start.  sd_read reads a
+ * sector of 512 bytes.  sd_load reads a file of the root directory of
+ * a FAT16 or FAT32 card, named as directories name it (eleven
+ * characters, "RNSE    BIN"), to `to`, which has room for `max` bytes
+ * and must have it for whole sectors: 0, -1 a read failed, -2 no such
+ * file, -3 too long. */
+int sd_init(int slot);
+int sd_read(u32 sector, void *buf);
+int sd_load(const char *name, void *to, u32 max, u32 *size);
+
 /* What the hardware layer provides to the drive code: the task file
  * (register 0..7 as in ATA: 1 error/features, 2 interrupt reason, 4 and
  * 5 byte count, 6 drive, 7 status/command), the alternate status, and
@@ -158,6 +173,10 @@ int stock_update(void);
  * where the disc is behind the display, this is the trap that
  * stock_update is there to avoid.  Does not return. */
 void restart(void);
+/* Another program of this kind, from memory, in this one's place: see
+ * src/wayback.c.  With sd_load, programs come from an SD card. */
+int run_image(void *image, u32 bytes);
+/* (way_back_scratch, below, is where there is room for such an image.) */
 /* What the program was started with: the screen language (0..8) and
  * two values the stock loader gets as well. */
 extern u32 start_args[3];

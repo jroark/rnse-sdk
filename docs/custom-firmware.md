@@ -108,6 +108,47 @@ and copies through uncached addresses.  Take the invalidation out and
 the 192 fails in the emulator as it would on the bench, executing what
 is left of the program from the instruction cache.
 
+## Programs from an SD card
+
+A disc for every program to try is slow and costs a disc.  On the 192
+there is another way once one disc is made: `sdk/examples/sdboot` is a
+loader that goes on that disc, and what it starts is the file
+`RNSE.BIN` in the root directory of a FAT card in either slot, a
+program as `build.sh` makes it.  The stock software starts the loader
+from the disc as it starts any program there; the loader reads the
+file, puts it in its own place and starts it with the arguments it was
+started with, and with the packed stock loader still where `rnse
+custom` put it, so the program's `stock_update` works.  A program that
+ends in `restart()` is back at the loader half a minute later, with
+whatever is on the card by then.
+
+    sdk/build.sh 192 sdboot
+    rnse custom disc.iso V222 sdk/out/sdboot-192.bin sdboot.iso --index 0380
+    sdk/build.sh 192 hello && mkdir card && cp sdk/out/hello-192.bin card/RNSE.BIN
+    rnse card card.img card
+    rnse boot sdboot.iso --variant V222 --ignition --installed-index 0370 \
+        --sd-card card.img --cycles 9000000000 --screenshot hello.png
+
+The cards are the card processors' (`docs/hardware.md`, "SD card
+processors"), and the SDK has no program for those: `sd_init`
+(`sdk/src/sd.c`) loads the installed software's own, out of the unit's
+flash, the way that software's driver loads it, and then says to it
+what that driver says.  So it works with one installed software, the
+North American 0371, and looks before it starts whether that is what
+the flash holds.  `tools/dsp-recipe.py` makes the table by which the
+download is put together from the flash, out of a trace of the stock
+driver (`rnse boot --sd-card ... --trace-dsp`) and a flash image, and
+checks that the table rebuilds every word; another software needs its
+own table.  `sd_read` reads a sector, `sd_load` a file from a FAT16 or
+FAT32 card, `run_image` starts an image in the running program's place.
+
+In the emulator all of it runs, both slots, with the stock software and
+a unit's boot ROM at both ends (`tests/disc.rs`,
+`programs_come_from_an_sd_card`).  None of it has run on a unit.  What
+the emulator cannot vouch for: the times a real card processor and a
+real card take, a high-capacity card, and FAT32, for which the
+emulator has no card.
+
 ## Building and running
 
 You need an SH-4 GCC that can produce big-endian code without its
@@ -204,14 +245,9 @@ emulated bus every 300 ms, `--can-alone` takes every other node away).
 The program keeps to the memory the stock loader's image occupies.  It
 uses no service of the boot ROM.
 
-Not in the kit: sound, and the SD cards.  On the 192 both are behind
-the two signal processors of the card board, which do nothing until a
-program is loaded into them; the emulator has those processors
-(`docs/hardware.md`, "SD card processors"), so a driver for them could
-be written and tried here, with a program of one's own for them or with
-the one the stock software carries, read from the disc at run time (it
-is part of the stock software and cannot be put into the kit).  Neither
-has been done.
+Not in the kit: sound.  On the 192 it is behind the two signal
+processors of the card board, like the SD cards, which the kit does
+read: see "Programs from an SD card".
 
 There is no C library.  The compiler's own support routines are not
 there either, so `/` and `%` on variables will not link: use `udiv` and

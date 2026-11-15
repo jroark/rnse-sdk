@@ -1,0 +1,392 @@
+/* SD cards on the 192, through the card processor of a slot.
+ *
+ * The slots belong to two signal processors (NEC uPD77115) that do
+ * nothing until a program is loaded into them, and the card interface
+ * is theirs.  This driver has no program of its own for them: it loads
+ * the installed software's, **out of the unit's flash**, where it is
+ * part of the operating system, and then says to it what the installed
+ * software's driver says: start, the card's start-up commands, and for
+ * every sector "read it into your memory" and "give me that memory".
+ * docs/hardware.md, "SD card processors", has the protocol; the words
+ * here are those of the stock driver as the emulator shows them
+ * (`rnse boot --sd-card ... --trace-dsp`).
+ *
+ * So this works with one installed software and no other: the North
+ * American V222 0371, whose program sits at 0x00200000 in the flash.
+ * The table below says how the stock driver's download is put together
+ * from the flash (tools/dsp-recipe.py makes it from a trace and checks
+ * that it rebuilds every word); sd_init looks for the program's
+ * header first and gives up on a unit that has other software.
+ *
+ * Reading only.  Standard and high-capacity cards. */
+#include "rnse.h"
+
+#define STATUS 0xb2400001 /* bits 2, 0: nothing to read; 3, 1: cannot write */
+#define LATCH 0xb6000004  /* bits 2, 3: the processors' reset lines, low = reset */
+static const u32 port[2] = { 0xb5000002, 0xb500004a };
+
+enum { FROM_FLASH, ZEROES, LITERAL, ANSWER };
+static const u16 literal[] = { 0x0001, 0x0e00, 0x0c00, 0x0002, 0x1c6f, 0x8000, 0x00f6, 0x9f00, 0x0004, 0x0002, 0x0bfb, 0x0000, 0x0000, 0x026c, 0x2994, 0x0467, 0x4900, 0x0001, 0x4ef2, 0x0001, 0x0002, 0x061d, 0x29e3, 0x0f4f, 0x4000 };
+static const struct step { u8 kind; u32 at; u16 count; } recipe[] = {
+    { LITERAL, 0x000000, 3 },
+    { FROM_FLASH, 0x20000c, 7168 },
+    { ANSWER, 0x000000, 0 },
+    { LITERAL, 0x000003, 3 },
+    { FROM_FLASH, 0x203818, 14558 },
+    { ANSWER, 0x000000, 0 },
+    { LITERAL, 0x000006, 2 },
+    { FROM_FLASH, 0x20a9dc, 492 },
+    { ANSWER, 0x000000, 0 },
+    { LITERAL, 0x000008, 5 },
+    { ANSWER, 0x000000, 0 },
+    { LITERAL, 0x00000d, 2 },
+    { FROM_FLASH, 0x20adcc, 620 },
+    { ANSWER, 0x000000, 0 },
+    { LITERAL, 0x00000f, 2 },
+    { FROM_FLASH, 0x20b2ac, 1127 },
+    { ANSWER, 0x000000, 0 },
+    { LITERAL, 0x000011, 3 },
+    { ANSWER, 0x000000, 0 },
+    { LITERAL, 0x000014, 3 },
+    { ZEROES, 0x000000, 58 },
+    { FROM_FLASH, 0x20bc04, 1507 },
+    { ANSWER, 0x000000, 0 },
+    { LITERAL, 0x000017, 2 },
+    { ZEROES, 0x000000, 31 },
+    { FROM_FLASH, 0x20c810, 3888 },
+    { ANSWER, 0x000000, 0 },
+};
+
+static int slot = -1;
+static int high_capacity;
+
+static int wait_low(u8 mask, u32 ms)
+{
+    u32 start = millis();
+    while (REG8(STATUS) & mask)
+        if (millis() - start > ms)
+            return -1;
+    return 0;
+}
+
+static int put(u16 w)
+{
+    /* (Generous: the program takes its time over its own start,
+     * after the last word of the download.) */
+    if (wait_low(slot ? 2 : 8, 3000))
+        return -1;
+    REG16(port[slot]) = w;
+    return 0;
+}
+
+static int get(u16 *w, u32 ms)
+{
+    if (wait_low(slot ? 1 : 4, ms))
+        return -1;
+    *w = REG16(port[slot]);
+    return 0;
+}
+
+/* A message's answer: its header and the words it counts (at most
+ * `max` are kept).  The header, or -1. */
+static int answer(u16 *out, int max, u32 ms)
+{
+    u16 head, w;
+    int i;
+    if (get(&head, ms))
+        return -1;
+    for (i = 0; i < (head & 0xff); i++) {
+        if (get(&w, 300))
+            return -1;
+        if (i < max)
+            out[i] = w;
+    }
+    return head;
+}
+
+/* A message of `n` words whose answer is the plain "done" (0xf000). */
+static int say(const u16 *m, int n)
+{
+    int i;
+    for (i = 0; i < n; i++)
+        if (put(m[i]))
+            return -1;
+    return answer(0, 0, 1000) == 0xf000 ? 0 : -1;
+}
+
+/* A word of the processor's memory set: 0 its registers, 1 its data. */
+static int poke(u16 space, u16 addr, u16 value)
+{
+    u16 m[4] = { 0x2303, space, addr, 1 };
+    if (say(m, 4))
+        return -1;
+    return put(value);
+}
+
+/* A command to the card: the interface's command register value and
+ * the argument.  The card's response, as the processor hands it on, is
+ * in `r` (up to nine words); 0 when one came. */
+static int command(u16 head, u16 reg, u32 arg, u16 *r, int expect)
+{
+    u16 m[4] = { head, reg, (u16)(arg >> 16), (u16)arg };
+    int i, got;
+    for (i = 0; i < 9; i++)
+        r[i] = 0;
+    if (say(m, 4))
+        return -1;
+    if (!expect)
+        return 0;
+    got = answer(r, 9, 2000);
+    return got < 0 || (got >> 8) == 0xee ? -1 : 0;
+}
+
+static u16 flash_word(u32 at)
+{
+    const u8 *p = (const u8 *)(0x80000000 + at);
+    return (u16)(p[0] | p[1] << 8);
+}
+
+/* The installed software's program into the processor, as its driver
+ * sends it. */
+static int download(void)
+{
+    u32 i, k;
+    u16 w;
+    for (i = 0; i < sizeof recipe / sizeof recipe[0]; i++) {
+        const struct step *s = &recipe[i];
+        if (s->kind == ANSWER) {
+            if (get(&w, 2000))
+                return -1;
+            continue;
+        }
+        for (k = 0; k < s->count; k++) {
+            w = s->kind == FROM_FLASH ? flash_word(s->at + 2 * k) : s->kind == LITERAL ? literal[s->at + k] : 0;
+            if (put(w))
+                return -1;
+        }
+    }
+    return 0;
+}
+
+int sd_init(int which)
+{
+    static const u16 start[] = { 0x1202, 0xd762, 0x0034 };
+    static const u16 a[] = { 0x7301, 0x0002 }, b[] = { 0x3301, 0x0001 }, c[] = { 0x3101, 0x0001 };
+    static const u16 d[] = { 0x3201, 0x0000 }, e[] = { 0x0301, 0x0000 }, f[] = { 0x0301, 0x0001 }, g[] = { 0x7400 };
+    u16 r[9], rca;
+    u32 t, ocr = 0, i;
+
+    if (screen_width != 400)
+        return -1; /* the 193 has a card interface of its own, and no driver here */
+    /* The program this driver knows how to send, where it knows it. */
+    if (flash_word(0x200000) != 1 || flash_word(0x200004) != 0x3800 || flash_word(0x20380c) != 2 || flash_word(0x203810) != 0x71bc)
+        return -2;
+    slot = which & 1;
+    high_capacity = 0;
+    REG32(LATCH) &= ~(4u << slot);
+    delay_ms(20);
+    REG32(LATCH) |= 4u << slot;
+    delay_ms(20);
+    if (download())
+        return -3;
+    /* The program starts itself up now, and a word sent into that is
+     * lost with the host interface none the wiser. */
+    delay_ms(300);
+    if (say(start, 3) || say(a, 2) || say(b, 2) || say(c, 2))
+        return -4;
+    for (i = 0; i < 2; i++)
+        if (put(d[i]))
+            return -4;
+    if (answer(r, 9, 1000) < 0)
+        return -4;
+    /* The card interface: its slow clock, and the card's start. */
+    if (poke(0, 0x3814, 0x3802) || poke(1, 0x4fb1, 0x0100) || say(e, 2))
+        return -5;
+    if (command(0x0b03, 0x4800, 0, r, 0))          /* CMD0 */
+        return -6;
+    command(0x0b03, 0x4c08, 0x000001aa, r, 1);     /* CMD8: answered by newer cards only */
+    t = millis();
+    do {
+        if (command(0x0b03, 0x4c37, 0, r, 1))      /* CMD55 */
+            return -7;
+        if (command(0x0b03, 0x4c29, 0x40ff0000, r, 1)) /* ACMD41 */
+            return -7;
+        ocr = (u32)(r[0] & 0xff) << 24 | (u32)r[1] << 8 | r[2] >> 8;
+        if (millis() - t > 3000)
+            return -8;
+        if (!(ocr & 0x80000000))
+            delay_ms(20);
+    } while (!(ocr & 0x80000000));
+    high_capacity = (ocr & 0x40000000) != 0;
+    if (!high_capacity) {
+        /* As the stock driver does for a standard card: once more
+         * without the claim to know the other kind. */
+        if (command(0x0b03, 0x4c37, 0, r, 1) || command(0x0b03, 0x4c29, 0x00ff0000, r, 1))
+            return -7;
+    }
+    if (poke(0, 0x3814, 0x3802))
+        return -5;
+    if (command(0x0b03, 0x4c42, 0, r, 1))          /* CMD2 */
+        return -9;
+    if (command(0x0b03, 0x4c03, 0, r, 1))          /* CMD3: the card's address */
+        return -9;
+    rca = (u16)((r[0] & 0xff) << 8 | r[1] >> 8);
+    if (command(0x0b03, 0x4c49, (u32)rca << 16, r, 1) || command(0x0b03, 0x4c4a, (u32)rca << 16, r, 1)) /* CMD9, CMD10 */
+        return -9;
+    /* The fast clock, the card selected, sectors of 512 bytes. */
+    if (poke(0, 0x3814, 0x0c02) || poke(1, 0x4fb1, 0x0004))
+        return -5;
+    if (command(0x0b03, 0x4c07, (u32)rca << 16, r, 1) || command(0x0b03, 0x4c10, 0x200, r, 1)) /* CMD7, CMD16 */
+        return -10;
+    if (say(f, 2))
+        return -11;
+    if (put(g[0]) || answer(r, 9, 1000) < 0)
+        return -11;
+    return 0;
+}
+
+int sd_read(u32 sector, void *buf)
+{
+    static const u16 fetch[] = { 0x2203, 0x0001, 0x5000, 0x0100 };
+    u8 *out = buf;
+    u16 r[9], w;
+    int i;
+    if (slot < 0)
+        return -1;
+    /* Where in its memory the processor is to put the sector, and how
+     * many words; then the card's read command (CMD17). */
+    if (poke(1, 0x4fb6, 0x5000) || poke(1, 0x4fb5, 0x0100))
+        return -1;
+    if (command(0x0503, 0x4d11, high_capacity ? sector : sector << 9, r, 1))
+        return -2;
+    /* And that memory, 256 words. */
+    for (i = 0; i < 4; i++)
+        if (put(fetch[i]))
+            return -3;
+    if (get(&w, 1000) || w != 0xd301 || get(&w, 300))
+        return -3;
+    for (i = 0; i < 256; i++) {
+        if (get(&w, 300))
+            return -3;
+        out[2 * i] = (u8)(w >> 8);
+        out[2 * i + 1] = (u8)w;
+    }
+    return 0;
+}
+
+/* ---- FAT16 and FAT32, as far as finding a file in the root directory
+ * and reading it goes. */
+
+static u8 sec[512];
+static u32 fat_start, data_start, root_start, root_entries, per_cluster;
+static int fat32;
+
+static u32 le16(const u8 *p) { return (u32)(p[0] | p[1] << 8); }
+static u32 le32(const u8 *p) { return le16(p) | le16(p + 2) << 16; }
+
+static int mount(void)
+{
+    u32 first = 0, fats, per_fat, reserved, total, clusters;
+    if (sd_read(0, sec))
+        return -1;
+    if (sec[510] != 0x55 || sec[511] != 0xaa)
+        return -2;
+    /* A partition table, or the file system right away. */
+    if (!(sec[0] == 0xeb || sec[0] == 0xe9) || le16(sec + 11) != 512) {
+        first = le32(sec + 446 + 8);
+        if (sd_read(first, sec))
+            return -1;
+        if (le16(sec + 11) != 512)
+            return -2;
+    }
+    per_cluster = sec[13];
+    reserved = le16(sec + 14);
+    fats = sec[16];
+    root_entries = le16(sec + 17);
+    per_fat = le16(sec + 22) ? le16(sec + 22) : le32(sec + 36);
+    total = le16(sec + 19) ? le16(sec + 19) : le32(sec + 32);
+    if (!per_cluster || !fats)
+        return -2;
+    fat_start = first + reserved;
+    root_start = fat_start + fats * per_fat;
+    data_start = root_start + (root_entries * 32 + 511) / 512;
+    clusters = udiv(total - (data_start - first), per_cluster);
+    fat32 = clusters >= 65525;
+    if (fat32)
+        root_start = le32(sec + 44); /* a cluster, not a sector */
+    return 0;
+}
+
+static u32 next_cluster(u32 c)
+{
+    u32 at = fat32 ? c * 4 : c * 2;
+    if (sd_read(fat_start + at / 512, sec))
+        return 0xffffffff;
+    return fat32 ? le32(sec + (at & 511)) & 0x0fffffff : le16(sec + (at & 511));
+}
+
+static int last(u32 c)
+{
+    return c < 2 || c >= (fat32 ? 0x0ffffff8u : 0xfff8u);
+}
+
+/* The entry of `name` (eleven characters, as in the directory) in a
+ * sector of directory entries: its first cluster and size.  1 found, 0
+ * not here, 2 the directory ends here. */
+static int look(const char *name, u32 *cluster, u32 *size)
+{
+    int e, i;
+    for (e = 0; e < 512; e += 32) {
+        if (sec[e] == 0)
+            return 2;
+        if (sec[e] == 0xe5 || (sec[e + 11] & 0x18))
+            continue;
+        for (i = 0; i < 11 && sec[e + i] == (u8)name[i]; i++)
+            ;
+        if (i == 11) {
+            *cluster = le16(sec + e + 26) | (fat32 ? le16(sec + e + 20) << 16 : 0);
+            *size = le32(sec + e + 28);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int sd_load(const char *name, void *to, u32 max, u32 *size)
+{
+    u32 cluster = 0, s, c, done = 0;
+    u8 *out = to;
+    int r = 0;
+    if (mount())
+        return -1;
+    if (fat32) {
+        for (c = root_start; !last(c) && r == 0; c = next_cluster(c))
+            for (s = 0; s < per_cluster && r == 0; s++) {
+                if (sd_read(data_start + (c - 2) * per_cluster + s, sec))
+                    return -1;
+                r = look(name, &cluster, size);
+            }
+    } else {
+        for (s = 0; s < (root_entries + 15) / 16 && r == 0; s++) {
+            if (sd_read(root_start + s, sec))
+                return -1;
+            r = look(name, &cluster, size);
+        }
+    }
+    if (r != 1)
+        return -2;
+    if (*size > max)
+        return -3;
+    for (c = cluster; done < *size; c = next_cluster(c)) {
+        if (last(c))
+            return -4;
+        for (s = 0; s < per_cluster && done < *size; s++) {
+            /* (The table of clusters shares the sector buffer: read
+             * the data straight to where it goes.) */
+            if (sd_read(data_start + (c - 2) * per_cluster + s, out + done))
+                return -1;
+            done += 512;
+        }
+    }
+    return 0;
+}
