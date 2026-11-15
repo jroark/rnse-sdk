@@ -66,6 +66,7 @@ void interrupt(void)
         /* The watchdog wants an edge on its strobe regularly. */
         if (!watchdog_hold)
             REG8(PORT0_DATA) ^= 1;
+        display_tick();
     } else if (code == 0x340) {
         /* Level 5: the CAN controller. */
         can_interrupt();
@@ -119,6 +120,57 @@ void screen_pixel(int x, int y, u8 colour)
  * loader does not use the faceplate. */
 #define UART3 0xa7a30000
 #define LATCH16 0xb6000004
+
+/* The fold-down display (docs/hardware.md, "Ports" and "A/D converter
+ * and the fold-down display").  Port 3, direction at +0 and data at +1:
+ * bit 3 runs the motor towards open, bit 4 towards closed, bit 2 is
+ * low only when the display is fully open.  The stock software sets
+ * bit 3 or bit 4, never both, and clears them to stop.  Its position is
+ * A/D input 3, of the converter that sdk/examples/suite reads. */
+#define PORT3 0xb2600000
+#define ADC 0xa7d00000
+
+const int display_input = 3;
+
+void display_port_init(void)
+{
+    /* Latches low before the lines become outputs, so that nothing
+     * left in them starts the motor. */
+    REG8(PORT3 + 1) &= (u8)~0x18;
+    REG8(PORT3) |= 0x18;
+}
+
+void display_motor(int dir)
+{
+    u8 v = REG8(PORT3 + 1) & (u8)~0x18;
+    if (dir < 0)
+        v |= 0x08;
+    else if (dir > 0)
+        v |= 0x10;
+    REG8(PORT3 + 1) = v;
+}
+
+int display_open_switch(void)
+{
+    return !(REG8(PORT3 + 1) & 0x04);
+}
+
+/* One conversion of an input: channel n converts the inputs of its
+ * group (0-3 or 4-6) up to n into results A, B, ... */
+int adc_convert(int input)
+{
+    int n;
+    REG16(ADC + 8) = (u16)(0x2000 | input);
+    for (n = 0; n < 20000; n++) {
+        if (REG16(ADC + 8) & 0x8000) {
+            int v = REG16(ADC + 2 * (input & 3)) >> 6;
+            REG16(ADC + 8) = 0;
+            return v;
+        }
+    }
+    REG16(ADC + 8) = 0;
+    return -1;
+}
 
 void panel_port_init(void)
 {

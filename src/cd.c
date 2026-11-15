@@ -66,9 +66,12 @@ int cd_command(const u8 *command, void *buf, u32 len)
     }
 }
 
+static int port_ready;
+
 int cd_init(void)
 {
     cd_port_init();
+    port_ready = 1;
     return wait_clear(BSY, 5000);
 }
 
@@ -162,4 +165,38 @@ int cd_find(const char *name, u32 *sector, u32 *size)
         }
     }
     return -3;
+}
+
+/* The disc out: the drive allowed to let it go (the stock software
+ * forbids removal) and told to eject, as sdk/examples/base does it.
+ * The drive's port is set up first if cd_init has not done so. */
+
+int cd_eject(void)
+{
+    static const u8 allow_removal[12] = { 0x1e, 0, 0, 0, 0 };
+    static const u8 eject[12] = { 0x1b, 1, 0, 0, 2 };
+    if (!port_ready) {
+        cd_port_init();
+        port_ready = 1;
+    }
+    cd_command(allow_removal, 0, 0);
+    return cd_command(eject, 0, 0);
+}
+
+int cd_follow_key(void)
+{
+    static int was;
+    int down = panel_key(KEY_CD_EJECT), pressed = down && !was;
+    was = down;
+    if (pressed)
+        cd_eject();
+    return pressed;
+}
+
+/* What every program owes the keys (see rnse.h). */
+void panel_service(void)
+{
+    panel_poll();
+    display_follow_key();
+    cd_follow_key();
 }

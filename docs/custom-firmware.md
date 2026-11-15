@@ -56,10 +56,14 @@ start.  Start here.
 The installed software starts the program at *every* start for as long
 as the disc is in the drive, and it does so before it would react to
 the eject key (tried in the emulator: the key is ignored in those first
-seconds).  The disc sits behind the motorised display, which the
-program does not move.  So a program that just runs is a trap: the unit
-is not damaged, but it is the program's until the disc is out, and the
-disc does not come out.
+seconds).  The disc sits behind the motorised display, which only a
+program that runs the motor itself can fold down (`display_open`, see
+"What a program gets"; the eject key is behind it too).  So a program
+that just runs is a trap: the unit is not damaged, but it is the
+program's until the disc is out, and the disc does not come out.  A
+program that offers the display key is less of one, but one that hangs
+or fails before it does is the same trap, which is why the way back
+below does not depend on it.
 
 What ends that is the stock loader, because an update leaves the unit
 with the disc's software index, and then the disc is no update any
@@ -448,7 +452,21 @@ the stock software (`stock_update`, above), and the keys and
 knobs of the faceplate (`panel_init`, `panel_poll`, `panel_key`,
 `panel_knob`), and the CD drive (`cd_init`, `cd_wait_ready`, `cd_read`,
 `cd_find` for a file in the root directory of the disc), and the car's
-CAN bus (`can_init`, `can_send`, `can_receive`).  Seven examples
+CAN bus (`can_init`, `can_send`, `can_receive`), and the fold-down
+display in front of the drive and the card slots (`display_open`,
+`display_close`, `display_follow_key` for the stock software's key
+next to the power button; `display_position`, `display_state`).  The
+tick stops the display's motor when the position no longer changes,
+as the stock software does (`docs/hardware.md`, "A/D converter and the
+fold-down display"), and every hand-over to another program stops it
+at once.  `panel_service()` is what every program owes the keys
+wherever it waits: the faceplate answered, the display key followed
+and CD EJECT obeyed (`cd_eject`), so that the disc and the cards can
+always be got at; set `sd_idle` and `display_idle` to it as well.
+`sdk/examples/display` shows the position and moves the display (the
+key, NEXT, PREV, SELECT to stop; RETURN held for two seconds back to
+the SD loader); `sdk/examples/sdboot` and `sdk/examples/base` follow
+both keys.  Seven examples
 (`sdk/examples/report` and `sdk/examples/drive` have sections of their
 own below):
 `sdk/examples/probe` is the one for a first try on a unit (see "The way
@@ -477,6 +495,7 @@ emulated bus every 300 ms, `--can-alone` takes every other node away).
 | CD drive | ATA registers at 0x07800001 + 2n, data at 0x07880000 | chip's ATAPI interface at 0xffc62100 |
 | CAN | HCAN2 at 0x07c00000 | on-chip controller at 0xffdf0000, other mailbox layout |
 | watchdog strobe | port 0 bit 0 (0x12300001), toggled by the tick | 0xffc44008 bit 0, toggled by the tick |
+| display motor | port 3 (0x12600001) bit 3 open, 4 closed; A/D input 3 | port 0xff93f008 bits 18, 19 (which is which assumed); A/D input 4 |
 
 The program keeps to the memory the stock loader's image occupies.  It
 uses no service of the boot ROM.
@@ -613,7 +632,10 @@ registers at 0xb6000000, the clock chip against the timer, the
 faceplate controller's start, what the radio processor says on its
 line when nobody asks, the drive's name and its reading times at three
 places of the disc, the CAN controller's counters, thirty seconds in
-which keys and knobs are logged, and at the end the watchdog: the
+which keys and knobs are logged, the display folded down by the SDK's
+driver with its position every 50 ms (how long the motor runs, where
+its ends read; it stays open for the disc change, whose CD EJECT is
+behind it, and closes after), and at the end the watchdog: the
 strobe stops and records follow every 10 ms until the unit is reset,
 which is how long the watchdog waits.  It writes nothing anywhere and ends in a restart, so the disc
 can be used again.  `tests/disc.rs` runs it against the emulator's own

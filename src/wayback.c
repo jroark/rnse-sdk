@@ -124,6 +124,7 @@ int stock_update(void)
     }
 
     /* From here on there is no going on with the program. */
+    display_halt();
     irq_disable();
     words = (u32)(way_back_stub_end - way_back_stub);
     for (i = 0; i < words; i++)
@@ -163,6 +164,7 @@ int run_image(void *image, u32 bytes)
         return -1; /* its entry point is not in the loader's place */
     words[6] = way_back_offset[0];
     words[7] = way_back_offset[1];
+    display_halt();
     irq_disable();
     n = (u32)(way_back_stub_end - way_back_stub);
     for (i = 0; i < n; i++)
@@ -219,6 +221,7 @@ int loader_run(void *image, u32 bytes, int slot, u32 blocked)
     for (i = 0; i < 3; i++)
         if ((w[i] & 1) || w[i] < LOADER_BASE + 0xa0 || w[i] >= LOADER_BASE + 0x80 + bytes)
             return -2;
+    display_halt();
     irq_disable();
     for (i = 0; i < LOADER_SIZE; i += 32) {
         u32 a = LOADER_BASE + i;
@@ -252,6 +255,7 @@ void loader_return(int status)
         sum += ((volatile u32 *)SNAPSHOT)[i];
     if (sum != SESSION[6])
         return; /* corrupted backup: never execute it */
+    display_halt();
     irq_disable();
     /* Stop timers and every DMA channel before restoring live code. */
     REG8(0xffd80004) = 0;

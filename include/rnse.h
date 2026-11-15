@@ -87,6 +87,58 @@ int panel_getc(void);
 void panel_putc(u8 c);
 extern const u8 panel_settings[];
 
+/* The fold-down display: the screen tilts down and out on a motor to
+ * uncover the CD drive and the two SD card slots, which is what the
+ * key next to the power button (KEY_DISPLAY) does on the stock
+ * software.  display_open and display_close start the motor and return
+ * at once; the 10 ms tick watches the position and stops the motor
+ * when it no longer changes (at an end, or against a hand), as the
+ * stock software does, and after 8 s in any case.  A hand-over to
+ * another program (stock_update, restart, run_image, loader_run,
+ * loader_return) stops it too.  On the 192 this is the stock software's
+ * own sequence; on the 193 which of the two motor lines closes is
+ * assumed (src/hw193.c).  The position is the A/D converter's reading,
+ * 0 (fully open, 94 at most) to 1023 (closed, 894 at least); -1 when
+ * the converter did not answer. */
+enum { DISPLAY_CLOSED, DISPLAY_OPEN, DISPLAY_BETWEEN, DISPLAY_OPENING, DISPLAY_CLOSING, DISPLAY_STUCK };
+int display_position(void);
+/* DISPLAY_STUCK: the last run stopped in between. */
+int display_state(void);
+void display_open(void);
+void display_close(void);
+/* Closes it when it is open or opening, opens it otherwise. */
+void display_toggle(void);
+void display_stop(void);
+/* Until the motor has stopped, for at most ms; the state then.  Calls
+ * display_idle meanwhile, when set (to panel_poll, say). */
+int display_wait(u32 ms);
+extern void (*display_idle)(void);
+/* How long the last run took the motor, in ms. */
+u32 display_run_ms(void);
+/* The stock software's key: to be called in the loop after panel_poll;
+ * a press of KEY_DISPLAY opens or closes the display.  1 when it did. */
+int display_follow_key(void);
+/* One conversion of an input of the A/D converter (0..6 on the 192,
+ * 0..7 on the 193), ten bits; -1 when it did not finish. */
+int adc_read(int input);
+
+/* What the hardware layer provides for it: the motor lines made
+ * outputs, the motor run (-1 towards open, 1 towards closed, 0 off), the
+ * end switch (1: fully open), a conversion with no regard for
+ * interrupts, and the converter's input with the position.
+ * display_tick is called by the tick, display_halt by the hand-overs. */
+void display_port_init(void);
+void display_motor(int dir);
+int display_open_switch(void);
+int adc_convert(int input);
+extern const int display_input;
+void display_tick(void);
+void display_halt(void);
+
+/* Interrupts masked, and SR as it was; SR back. */
+u32 irq_save(void);
+void irq_restore(u32 sr);
+
 /* The CD/DVD drive: an ATAPI device, used here by programmed I/O and
  * without interrupts.  Results: 0 = done; -1 = the drive did not react
  * in time; above 0 = the drive refused, and the value is 0x100 plus its
@@ -98,6 +150,17 @@ int cd_init(void);
 int cd_command(const u8 *command, void *buf, u32 len);
 /* Waits until a disc can be read, for at most the given time. */
 int cd_wait_ready(u32 ms);
+/* The disc out (the drive allowed to release it, then ejected); and
+ * the CD EJECT key, to be called in the loop after panel_poll: a press
+ * ejects.  cd_follow_key returns 1 when it did. */
+int cd_eject(void);
+int cd_follow_key(void);
+/* What every program owes the unit's keys, wherever it waits: the
+ * faceplate answered (panel_poll), the display key followed
+ * (display_follow_key) and CD EJECT obeyed (cd_follow_key), so that the
+ * disc and the cards behind the display can always be got at.  Call it
+ * in every loop, and set sd_idle and display_idle to it. */
+void panel_service(void);
 /* Sectors of 2048 bytes. */
 int cd_read(u32 sector, u32 count, void *buf);
 /* A file in the root directory of an ISO 9660 disc, by its name in
