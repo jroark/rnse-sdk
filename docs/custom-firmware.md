@@ -220,16 +220,14 @@ two tones out of the speaker at the right pitch on the right sides
 and the volume knob moves the amplifier (`tests/disc.rs`,
 `sdk_player_plays_an_mp3`).  Standard cards only.
 
-On a unit (the North American 192, the player from a 32 MB card) it
-does what can be told without a speaker, of which the bench has none:
-the card processor takes the file and plays it through, 6.06 s for the
-test file, and the next after it; NEXT, PREV, SELECT and the select
-knob start files as fast as they are pressed; the radio processor
-acknowledges the source and every volume from 0 to 30.  Whether the
-amplifier then lets the converter through to the speakers is what
-nobody has heard yet: the emulator's radio processor is a stand-in
-that takes the frames, and what a real one wants besides (a mute, a
-power state) is not known.
+On a unit (the North American 192, the player from a 32 MB card, a
+speaker on the front right output) it plays: the file's tone is heard
+and the volume knob makes it louder and quieter.  The card processor
+plays the test file through in 6.06 s and the next after it; NEXT,
+PREV, SELECT and the select knob start files as fast as they are
+pressed; the radio processor acknowledges the source and every volume
+from 0 to 30.  So the two frames are all the amplifier wants, from
+the state the stock software leaves it in.
 
 The first try on the unit failed three seconds into the file, with the
 screen dark for the time: the driver waited to write a word while the
