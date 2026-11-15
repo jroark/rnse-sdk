@@ -108,17 +108,23 @@ irq_enable:
 ! code, which is at the start of the flash on both units.  That is where
 ! the stock loaders end an update as well.  Nothing is written anywhere:
 ! the unit starts its installed software, and with the disc still in
-! the drive that software starts the program again.
+! the drive that software starts the program again.  The display's
+! motor is stopped first: the jump is no reset, the port keeps its
+! levels, and nothing would stop the motor until the OS is up.
         .global restart
 restart:
         mov.l   1f, r0
         ldc     r0, sr
+        mov.l   3f, r0
+        jsr     @r0
+         nop
         mov.l   2f, r0
         jmp     @r0
          nop
         .align  2
 1:      .long   0x400000f0
 2:      .long   0xa0000000
+3:      .long   display_halt
 
 ! Mask interrupts of every level.
         .global irq_disable
@@ -129,6 +135,24 @@ irq_disable:
          nop
         .align  2
 1:      .long   0x400000f0
+
+! Mask interrupts of every level and return what SR was, for
+! irq_restore: around a short piece of code that must not meet an
+! interrupt handler, whether interrupts were open before or not.
+        .global irq_save
+irq_save:
+        stc     sr, r0
+        mov     r0, r1
+        or      #0xf0, r0
+        ldc     r0, sr
+        rts
+         mov    r1, r0
+
+        .global irq_restore
+irq_restore:
+        ldc     r4, sr
+        rts
+         nop
 
 ! The last step of handing over to the stock loader (wayback.c).  Copied
 ! to memory outside the program's place and run there through its

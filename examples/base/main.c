@@ -7,6 +7,8 @@
  *   MEDIA          MP3 files from a card (first slot, then second);
  *                  the select knob, NEXT and PREV choose
  *   volume knob    louder, quieter
+ *   display key    (next to the power button) the display opens, to
+ *                  get at the disc and the cards, and closes again
  *   CD EJECT       the disc out
  *   RETURN, 2 s    the program takes itself out of the flash and the
  *                  boot ROM installs the update disc it is given
@@ -148,7 +150,8 @@ int main(void)
     line(screen_height - 20, "HOLD RETURN 2 S: PROGRAM OUT", 1, 2);
     can_init();
     panel_init();
-    sd_idle = panel_poll;
+    sd_idle = panel_service;
+    display_idle = panel_service;
     cd_init();
     cd_command(allow_removal, 0, 0);
     r = radio_start();
@@ -161,6 +164,7 @@ int main(void)
         static const int keys[6] = { KEY_RADIO, KEY_MEDIA, KEY_NEXT, KEY_PREV, KEY_CD_EJECT, KEY_RETURN };
         int key[6], turn, pressed[6];
         panel_poll();
+        display_follow_key();
         if (!healthy && millis() > 10000) {
             healthy = 1;
             firmware_healthy();

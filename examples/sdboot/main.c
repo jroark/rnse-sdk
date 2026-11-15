@@ -1,7 +1,10 @@
 /* Persistent SD test loader for the North American 192 / V222 0371.
  * RNSE.BIN is a rebuilt SDK image. Completion returns here in RAM;
  * remove/reinsert the card, or press RETURN, to run another test.
- * SETUP twice within five seconds starts the carried stock updater. */
+ * The key next to the power button opens and closes the display, CD
+ * EJECT behind it ejects the disc, wherever the loader waits.  There
+ * is deliberately no way from here to the stock updater or any other
+ * writing of the flash (CLAUDE.md, "Mandatory hardware behavior"). */
 #include "rnse.h"
 
 static int s, row;
@@ -44,9 +47,9 @@ static void number(const char *what, int v)
 int main(void)
 {
     u8 *image = (u8 *)(way_back_scratch + 0x1000);
-    u32 changed[2] = { 0, 0 }, size, confirm = 0, keys_start, blocked = 0;
+    u32 changed[2] = { 0, 0 }, size, keys_start, blocked = 0;
     int raw[2], stable[2] = { 0, 0 }, armed[2] = { 1, 1 };
-    int slot, r, status = 0, returned, setup_down = 0, return_down = 0;
+    int slot, r, status = 0, returned, return_down = 0;
 
     returned = loader_returned(&status, &blocked);
     board_init();
@@ -56,7 +59,8 @@ int main(void)
     screen_palette(2, 255, 96, 0);
     screen_text(8 * s, 6 * s, "PROGRAMS FROM AN SD CARD", 2, 2 * s);
     panel_init();
-    sd_idle = panel_poll;
+    sd_idle = panel_service;
+    display_idle = panel_service;
     can_init();
     keys_start = millis();
     return_down = returned >= 0;
@@ -66,25 +70,16 @@ int main(void)
         number("TEST RETURNED:", status);
     }
     say("WAITING FOR CARD", 1);
-    say("RETURN: RERUN  SETUP TWICE: UPDATE", 2);
+    say("RETURN: RERUN", 2);
+    screen_text(8 * s, screen_height - 12 * s, "KEY BY THE POWER BUTTON: DISPLAY.  CD EJECT: DISC OUT", 2, s);
     for (slot = 0; slot < 2; slot++) {
         raw[slot] = sd_present(slot);
         changed[slot] = millis();
     }
     for (;;) {
-        panel_poll();
-        if (panel_key(KEY_SETUP) && !setup_down) {
-            if (confirm && millis() - confirm < 5000 && stock_loader_carried())
-                stock_update();
-            confirm = millis() | 1;
-            row = 5;
-            say("SETUP AGAIN TO UPDATE STOCK FIRMWARE", 2);
-        }
-        setup_down = panel_key(KEY_SETUP);
-        if (panel_key(KEY_RETURN) && !return_down) {
+        panel_service();
+        if (panel_key(KEY_RETURN) && !return_down)
             armed[0] = armed[1] = 1;
-            confirm = 0;
-        }
         return_down = panel_key(KEY_RETURN) ||
             (returned >= 0 && (!panel_online() || millis() - keys_start < 1000));
         for (slot = 0; slot < 2; slot++) {
@@ -118,6 +113,9 @@ int main(void)
             if (!r) {
                 number("RNSE.BIN, BYTES:", (int)size);
                 say("STARTING IT", 2);
+                /* A display on its way stops where it is at the
+                 * hand-over; let it get there first. */
+                display_wait(10000);
                 r = loader_run(image, size, slot, (!armed[0]) | (!armed[1] << 1));
             }
             number("LOAD ERROR:", r);
