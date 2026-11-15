@@ -112,6 +112,9 @@ int cd_find(const char *name, u32 *sector, u32 *size);
  * and must have it for whole sectors: 0, -1 a read failed, -2 no such
  * file, -3 too long. */
 int sd_init(int slot);
+/* The card as the installed software has started it, with nothing
+ * reset: 0, or negative when no sector can be read that way. */
+int sd_attach(int slot);
 /* After a failure: the last card command (the interface's command
  * register value), the header of the processor's answer and two words
  * of it. */

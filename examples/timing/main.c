@@ -8,7 +8,8 @@
  *   20  the display: vertical syncs counted in two seconds (item 0)
  *       and the microseconds from one to the next, eight times (1..8)
  *   21  the cards, each slot (items +0 for the first, +0x10 for the
- *       second): what sd_init said and its milliseconds (0), the last
+ *       second): what sd_attach said (5), what sd_init said after it
+ *       and its milliseconds (0), the last
  *       command and the processor's answer (1), then microseconds:
  *       one sector (2), 64 sectors one after the other (3), 64 sectors
  *       1000 apart (4, within the first 15 MB), with the number that
@@ -110,7 +111,13 @@ static void cards(void)
     for (slot = 0; slot < 2; slot++) {
         u8 base = (u8)(slot * 0x10);
         u32 t = millis(), i, good;
-        int r = sd_init(slot);
+        int r = sd_attach(slot);
+        rec(21, (u8)(base + 5), (u32)r, millis() - t);
+        show(slot ? "CARD 2: AS LEFT (0)" : "CARD 1: AS LEFT (0)", (u32)-r);
+        if (r) {
+            t = millis();
+            r = sd_init(slot);
+        }
         rec(21, base, (u32)r, millis() - t);
         rec(21, (u8)(base + 1), (u32)sd_last[0] << 16 | sd_last[1], sd_last[2]);
         if (r) {

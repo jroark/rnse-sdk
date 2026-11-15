@@ -165,8 +165,18 @@ CMD1, a MultiMediaCard's question; a card that answers is started as
 one (CMD1 every 300 ms until ready, and the address 0 for it); with no
 answer it asks CMD55 again, and so round and round.  `sd_init` does
 the same since.  Which of the two that card is, slow to wake or a
-MultiMediaCard, is not known, and that version of the driver has not
-met it.  Three
+MultiMediaCard, is not known: on the unit that card answered that
+round no better (six starts, neither CMD55 nor CMD1 answered).
+
+So there is a second way to a card, `sd_attach`: the card as the
+installed software left it.  That software has sent the card
+processor its program and started the card before it ever starts a
+loader, and both are still so; `sd_attach` resets nothing, throws away
+what the processor still had to say and asks for a sector, and finds
+out by trying whether the card counts in bytes or sectors.  `sdboot`
+tries that first and `sd_init` after it.  In the emulator it reads
+standard and high-capacity cards so, in 40 ms; on a unit it has not
+run.  Three
 things a unit taught on the way:
 
 - **A card's start wants the stock driver's pace.**  That driver leaves

@@ -80,7 +80,16 @@ int main(void)
     for (slot = 0; slot < 2 && r; slot++) {
         u32 t = millis();
         number("SLOT", slot + 1);
-        r = sd_init(slot);
+        /* First as the installed software left the card, which costs
+         * nothing; then started anew. */
+        r = sd_attach(slot);
+        record((u8)(4 + slot), (u32)r, millis() - t);
+        if (r == 0) {
+            number("  AS THE STOCK SOFTWARE LEFT IT", 0);
+        } else {
+            t = millis();
+            r = sd_init(slot);
+        }
         record((u8)slot, (u32)r, millis() - t);
         record((u8)(8 + slot), (u32)sd_last[0] << 16 | sd_last[1], sd_last[2]);
         if (r) {

@@ -392,6 +392,51 @@ static int fat32, fat12;
 static u32 le16(const u8 *p) { return (u32)(p[0] | p[1] << 8); }
 static u32 le32(const u8 *p) { return le16(p) | le16(p + 2) << 16; }
 
+/* The card as the installed software left it: that software has sent
+ * the processor its program and started the card long before it
+ * starts a loader, and both are still as they were.  Nothing is reset
+ * and nothing started here; words the processor still had for the old
+ * driver are thrown away and a sector is asked for.  This is the way
+ * to a card that sd_init cannot start (a unit has one, 512 MB, which
+ * the stock software reads), and it takes no time.
+ *
+ * Whether the card counts in sectors or bytes is found by trying: the
+ * first partition's first sector has to look like one. */
+static int looks_like_a_volume(void)
+{
+    return sec[510] == 0x55 && sec[511] == 0xaa && le16(sec + 11) == 512 && sec[13] != 0;
+}
+
+int sd_attach(int which)
+{
+    u16 w;
+    u32 first;
+    int i;
+    if (screen_width != 400)
+        return -1;
+    if (flash_word(0x200000) != 1 || flash_word(0x200004) != 0x3800 || flash_word(0x20380c) != 2 || flash_word(0x203810) != 0x71bc)
+        return -2;
+    slot = which & 1;
+    high_capacity = 0;
+    for (i = 0; i < 600 && get(&w, 20) == 0; i++)
+        ;
+    if (sd_read(0, sec))
+        return -12;
+    if (sec[510] != 0x55 || sec[511] != 0xaa)
+        return -13;
+    if (looks_like_a_volume())
+        return 0; /* no partition table: nothing to tell by */
+    first = le32(sec + 446 + 8);
+    if (first == 0)
+        return -13;
+    if (sd_read(first, sec) == 0 && looks_like_a_volume())
+        return 0;
+    high_capacity = 1;
+    if (sd_read(first, sec) == 0 && looks_like_a_volume())
+        return 0;
+    return -13;
+}
+
 static int mount(void)
 {
     u32 first = 0, fats, per_fat, reserved, total, clusters;
