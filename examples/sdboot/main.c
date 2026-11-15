@@ -30,9 +30,12 @@ static int s, row;
 static char names[MAX_FILES][12];
 static int files, chosen, menu_slot = -1;
 
+/* A line of text at double size: the font's 5x7 glyphs make it 14
+ * pixels tall, the rows' pitch, and its blank has to cover all of
+ * them (at 12, the glyphs' bottom row stayed behind as dots). */
 static void say(const char *text, u8 colour)
 {
-    screen_fill(0, (30 + 14 * row) * s, screen_width, 12 * s, 0);
+    screen_fill(0, (30 + 14 * row) * s, screen_width, 14 * s, 0);
     screen_text(8 * s, (30 + 14 * row) * s, text, colour, 2 * s);
     console_puts(text);
     console_puts("\n");
@@ -131,7 +134,7 @@ static void draw_menu(void)
     for (i = 0; i < MAX_FILES; i++) {
         row = MENU_ROW + i;
         if (i >= files) {
-            screen_fill(0, (30 + 14 * row) * s, screen_width, 12 * s, 0);
+            screen_fill(0, (30 + 14 * row) * s, screen_width, 14 * s, 0);
             continue;
         }
         text[0] = i == chosen ? '>' : ' ';
@@ -145,7 +148,7 @@ static void clear_menu(void)
 {
     int i;
     for (i = MENU_ROW - 1; i < MENU_ROW + MAX_FILES; i++)
-        screen_fill(0, (30 + 14 * i) * s, screen_width, 12 * s, 0);
+        screen_fill(0, (30 + 14 * i) * s, screen_width, 14 * s, 0);
     menu_slot = -1;
 }
 
@@ -342,8 +345,11 @@ int main(void)
             stable[slot] = present;
             if (!stable[slot]) {
                 armed[slot] = 1;
-                if (menu_slot == slot)
+                if (menu_slot == slot) {
                     clear_menu();
+                    row = 2;
+                    say("", 1);  /* and the line naming its slot */
+                }
                 continue;
             }
             if (!armed[slot])
