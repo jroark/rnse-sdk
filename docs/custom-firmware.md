@@ -157,9 +157,16 @@ with nobody touching the unit.
 
 A 512 MB card did not start on that unit, in the first slot, twice: no
 answer to the first application command (CMD55) after CMD8 went
-unanswered as well, where the 32 MB card answers.  Whether the stock
-software reads that card is not known, nor what it wants; `sd_init`
-tries a card twice since.  Three
+unanswered as well, where the 32 MB card answers.  The stock software
+reads that card (it shows its 485 MB).  What the stock driver does
+with such a card the emulator shows, with a card made to behave so
+(`--sd-deaf N`, `--sd-mmc`): it starts the card anew (CMD0) and asks
+CMD1, a MultiMediaCard's question; a card that answers is started as
+one (CMD1 every 300 ms until ready, and the address 0 for it); with no
+answer it asks CMD55 again, and so round and round.  `sd_init` does
+the same since.  Which of the two that card is, slow to wake or a
+MultiMediaCard, is not known, and that version of the driver has not
+met it.  Three
 things a unit taught on the way:
 
 - **A card's start wants the stock driver's pace.**  That driver leaves

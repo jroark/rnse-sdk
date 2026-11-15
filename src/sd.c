@@ -200,13 +200,14 @@ static int download(void)
     return 0;
 }
 
-static int start_once(int which)
+int sd_init(int which)
 {
     static const u16 start[] = { 0x1202, 0xd762, 0x0034 };
     static const u16 a[] = { 0x7301, 0x0002 }, b[] = { 0x3301, 0x0001 }, c[] = { 0x3101, 0x0001 };
     static const u16 d[] = { 0x3201, 0x0000 }, e[] = { 0x0301, 0x0000 }, f[] = { 0x0301, 0x0001 }, g[] = { 0x7400 };
     u16 r[9], rca;
     u32 t, ocr = 0, hcs, i;
+    int mmc = 0;
 
     if (screen_width != 400)
         return -1; /* the 193 has a card interface of its own, and no driver here */
@@ -250,25 +251,58 @@ static int start_once(int which)
      * only; to the others the host does not claim to know
      * high-capacity cards. */
     hcs = command(0x0b03, 0x4c08, 0x000001aa, r, 1) ? 0 : 0x40000000;
+    /* The first application command.  A card that leaves it unanswered
+     * the stock driver starts anew and asks CMD1, a MultiMediaCard's
+     * way; with no answer to that either, CMD55 again, and so round and
+     * round.  (A unit's 512 MB card, which the stock software reads,
+     * left the first CMD55 unanswered.) */
+    for (i = 0;; i++) {
+        pause();
+        if (!command(0x0b03, 0x4c37, 0, r, 1))     /* CMD55 */
+            break;
+        if (i == 6)
+            return -7;
+        pause();
+        if (command(0x0b03, 0x4800, 0, r, 0))      /* CMD0 */
+            return -6;
+        pause();
+        if (!command(0x0b03, 0x4c01, 0x00ff0000, r, 1)) { /* CMD1 */
+            mmc = 1;
+            break;
+        }
+    }
     t = millis();
-    for (;;) {
-        pause();
-        if (command(0x0b03, 0x4c37, 0, r, 1))      /* CMD55 */
-            return -7;
-        pause();
-        if (command(0x0b03, 0x4c29, hcs | 0x00ff0000, r, 1)) /* ACMD41 */
-            return -7;
+    for (i = 0;; i++) {
+        if (mmc) {
+            /* (The first answer is there already.) */
+            if (i) {
+                delay_ms(300);
+                if (command(0x0b03, 0x4c01, 0x00ff0000, r, 1))
+                    return -7;
+            }
+        } else {
+            if (i) {
+                pause();
+                if (command(0x0b03, 0x4c37, 0, r, 1))
+                    return -7;
+            }
+            pause();
+            if (command(0x0b03, 0x4c29, hcs | 0x00ff0000, r, 1)) /* ACMD41 */
+                return -7;
+        }
         ocr = (u32)(r[0] & 0xff) << 24 | (u32)r[1] << 8 | r[2] >> 8;
         if (ocr & 0x80000000)
             break;
         if (millis() - t > 6000)
             return -8;
-        pause();
-        if (poke(0, 0x3814, 0x3802))
-            return -5;
+        if (!mmc) {
+            pause();
+            if (poke(0, 0x3814, 0x3802))
+                return -5;
+        }
     }
-    high_capacity = (ocr & 0x40000000) != 0;
-    if (hcs && !high_capacity) {
+    high_capacity = !mmc && (ocr & 0x40000000) != 0;
+    if (!mmc && hcs && !high_capacity) {
         /* As the stock driver does for a standard card that answered
          * CMD8: once more without the claim. */
         pause();
@@ -287,7 +321,10 @@ static int start_once(int which)
     pause();
     if (command(0x0b03, 0x4c03, 0, r, 1))          /* CMD3: the card's address */
         return -9;
-    rca = (u16)((r[0] & 0xff) << 8 | r[1] >> 8);
+    /* (A MultiMediaCard takes the address the host says, and the stock
+     * driver says none: 0, with which it then selects the card too.
+     * Whether such a card takes that is not known.) */
+    rca = mmc ? 0 : (u16)((r[0] & 0xff) << 8 | r[1] >> 8);
     pause();
     if (command(0x0b03, 0x4c49, (u32)rca << 16, r, 1)) /* CMD9 */
         return -9;
@@ -314,18 +351,6 @@ static int start_once(int which)
     if (put(g[0]) || answer(r, 9, 1000) < 0)
         return -11;
     return 0;
-}
-
-/* Twice: a unit had a card (512 MB) that left the first application
- * command unanswered, and whether it only wants a second go is what
- * the second go finds out.  Not for the failures that are not the
- * card's. */
-int sd_init(int which)
-{
-    int r = start_once(which);
-    if (r <= -6)
-        r = start_once(which);
-    return r;
 }
 
 int sd_read(u32 sector, void *buf)
