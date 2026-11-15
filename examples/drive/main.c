@@ -16,6 +16,9 @@
  *              (take it, push it in again; or try another disc)
  *   SETUP      done: with the update disc in the drive, hand over to
  *              the stock loader, which makes the unit whole again
+ *   RETURN     done, without an update: the unit starts again as it
+ *              is (and, with the disc in the drive, the program after
+ *              it: see restart in rnse.h)
  *
  * Every 100 ms the drive is asked TEST UNIT READY and, if it is not,
  * REQUEST SENSE.  A line is written for every change: the time in
@@ -30,7 +33,8 @@
  *        0 = error / 1 = ready / 2 = the drive did not answer
  *
  * EXTRA_CFLAGS: -DMINUTES=n ends it by itself after n minutes (default
- * 10), for a unit whose keys do not answer. */
+ * 10), for a unit whose keys do not answer: with the stock update, or,
+ * built with -DRESTART, with a restart. */
 #include "rnse.h"
 
 #ifndef MINUTES
@@ -112,14 +116,14 @@ static void log_line(u32 ms, int kind, u8 key, u8 code, u8 qualifier)
 int main(void)
 {
     u32 start, next = 0, last = 0xffffffff;
-    int was_eject = 0;
+    int was_eject = 0, again = 0;
 
     board_init();
     console_puts("\nrnse sdk: drive\n");
     s = screen_width / 400;
     screen_palette(1, 255, 255, 255);
     screen_palette(2, 255, 96, 0);
-    screen_text(4 * s, 2 * s, "DRIVE LOG  CD EJECT: OUT  SETUP: END", 2, s);
+    screen_text(4 * s, 2 * s, "DRIVE LOG  CD EJECT: OUT  SETUP: UPDATE  RETURN: RESTART", 2, s);
     panel_init();
     can_init();
     cd_init();
@@ -134,7 +138,13 @@ int main(void)
             cd_command(eject, 0, 0);
         }
         was_eject = panel_key(KEY_CD_EJECT);
-        if (panel_key(KEY_SETUP) || now > MINUTES * 60000u)
+        if (panel_key(KEY_RETURN))
+            again = 1;
+#ifdef RESTART
+        if (now > MINUTES * 60000u)
+            again = 1;
+#endif
+        if (again || panel_key(KEY_SETUP) || now > MINUTES * 60000u)
             break;
         if ((s32)(now - next) >= 0) {
             u8 sense[18];
@@ -160,6 +170,12 @@ int main(void)
     }
 
     show(ROWS, "", 1);
+    if (again) {
+        show(ROWS, "RESTARTING", 2);
+        console_puts("restarting\n");
+        delay_ms(1000);
+        restart();
+    }
     if (!stock_loader_carried()) {
         show(ROWS, "NO STOCK LOADER: NO WAY BACK", 2);
         for (;;)

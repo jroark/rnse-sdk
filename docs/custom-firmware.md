@@ -84,6 +84,21 @@ Things to know about it:
 * A program that hangs before it gets there is still a trap.  Keep the
   call on a path that cannot be blocked: a timer, as in the probe.
 
+On a bench there is a cheaper end: `restart()` goes to the boot ROM's
+reset code and changes nothing.  The unit starts its software, the
+software finds the disc again and starts the program again, round and
+round, and the unit's index stays what it was, so one disc serves for
+any number of tries; the disc comes out on the eject key in the half
+minute before each start.  The probe and the drive's log can be built
+to end that way (`-DRESTART`), and the drive's log restarts on RETURN.
+In the emulator this needs a real boot ROM in the stand-in's place
+(`--boot-rom`; the stand-in stops the run at a reset), and it goes
+round as described unless the drive is given its times (`--drive-times`,
+`--strict`): then the stock software's second big read after the
+restart gets no data and it never starts the program again.  A unit
+does start the program again ("On a real unit"), so that is a fault of
+the emulated drive; it is not understood.
+
 The emulator runs the whole circle, with the stock software at both
 ends (`rnse boot probe.iso --installed-index ...`, and the test
 `custom_program_hands_back_to_the_stock_loader`), and with the
@@ -534,8 +549,18 @@ Things that were wrong in what had been assumed, besides the latch:
    interrupt priorities are in the report too; none of it has been
    compared with the emulator's models yet.
 
-Not tried on the unit: the keys and knobs, the drive from a program,
-receiving on CAN, the drive's log.
+6. **The drive's log, ending in a restart** (`sdk/examples/drive`
+   built with `-DRESTART`).  The keys answer (CD EJECT, RETURN), the
+   drive takes commands from a program and its answers are logged
+   (`docs/boot-rom.md`, "A disc that goes in while the unit runs", has
+   them), and `restart()` works: the unit started again, unchanged,
+   and 71 s later its software had started the program from the disc
+   once more, by itself.  The screen was lit from the start: with the
+   latch left alone the faceplate controller keeps its lighting, and
+   `panel_init` after it does no harm.
+
+Not tried on the unit: the knobs, reading sectors from a program,
+receiving on CAN.
 
 ## What this does and does not establish
 

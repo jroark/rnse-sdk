@@ -6,7 +6,8 @@
  * drive command of this program's, no picture.
  *
  * WAIT seconds are shown (EXTRA_CFLAGS=-DWAIT=10 sdk/build.sh ... for
- * another number). */
+ * another number).  With -DRESTART it restarts the unit at the end
+ * instead, which changes nothing in it. */
 #include "rnse.h"
 
 #ifndef WAIT
@@ -74,6 +75,11 @@ int main(void)
     }
     screen_fill(12 * s, 136 * s, w - 24 * s, 14 * s, 0);
     screen_text(12 * s, 136 * s, "STARTING THE STOCK LOADER", 10, 2 * s);
+#ifdef RESTART
+    /* For a bench: the unit starts again as it is (restart in rnse.h). */
+    console_puts("restarting\n");
+    restart();
+#endif
     console_puts("starting the stock loader\n");
     i = stock_update();
     /* Only when that failed. */

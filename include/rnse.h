@@ -145,6 +145,15 @@ void can_interrupt(void);
  * loader, -2 a part of it is damaged in both of its copies. */
 int stock_loader_carried(void);
 int stock_update(void);
+/* The other end: start the unit again and leave it as it is.  Its
+ * software then finds the disc in the drive once more and, after its
+ * half minute of starting and checking, runs the program again, for as
+ * long as the disc is there: on a bench, where the disc can be taken
+ * out in that half minute, a disc that can be used any number of
+ * times, since the unit's software index never changes.  In a car,
+ * where the disc is behind the display, this is the trap that
+ * stock_update is there to avoid.  Does not return. */
+void restart(void);
 /* What the program was started with: the screen language (0..8) and
  * two values the stock loader gets as well. */
 extern u32 start_args[3];

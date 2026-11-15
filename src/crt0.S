@@ -93,6 +93,22 @@ irq_enable:
         .align  2
 1:      .long   0x40000000
 
+! Start the unit again: interrupts masked, and to the boot ROM's reset
+! code, which is at the start of the flash on both units.  That is where
+! the stock loaders end an update as well.  Nothing is written anywhere:
+! the unit starts its installed software, and with the disc still in
+! the drive that software starts the program again.
+        .global restart
+restart:
+        mov.l   1f, r0
+        ldc     r0, sr
+        mov.l   2f, r0
+        jmp     @r0
+         nop
+        .align  2
+1:      .long   0x400000f0
+2:      .long   0xa0000000
+
 ! Mask interrupts of every level.
         .global irq_disable
 irq_disable:
