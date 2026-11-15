@@ -343,8 +343,7 @@ line when nobody asks, the drive's name and its reading times at three
 places of the disc, the CAN controller's counters, thirty seconds in
 which keys and knobs are logged, and at the end the watchdog: the
 strobe stops and records follow every 10 ms until the unit is reset,
-which is how long the watchdog waits (the emulator's 1.5 s is a
-guess).  It writes nothing anywhere and ends in a restart, so the disc
+which is how long the watchdog waits.  It writes nothing anywhere and ends in a restart, so the disc
 can be used again.  `tests/disc.rs` runs it against the emulator's own
 models; the header of `main.c` has the records.
 
@@ -481,11 +480,13 @@ not `--strict` is given:
 * an address error for a misaligned access, the illegal-instruction
   exceptions (also for branches in delay slots);
 * the external watchdog of both units: once a program has started
-  toggling the strobe, 1.5 s without an edge resets the unit.  The real
-  limit is not known.  What is known is what the stock software does:
-  an edge every 10 ms from its tick, and never more than about 220 ms
-  between two (192) or 135 ms (193), from the first instruction on.  A
-  program that keeps to that is as safe as the stock software;
+  toggling the strobe, 105 ms without an edge reset the unit.  That is
+  a 192's, measured: with the strobe left alone the unit was reset
+  between 105 and 115 ms after its last edge.  (The emulator had 1.5 s
+  until then.)  The 193's is taken to be the same.  Interrupts off for
+  a tenth of a second is all it takes: copying half a megabyte through
+  uncached addresses, as the hand-over does, takes 107 ms on a unit,
+  which is why that code strobes as it goes;
 * interrupts only when unmasked in the controllers, with the stock
   priorities;
 * the CAN controller sends and receives only out of its reset and halt
@@ -544,9 +545,10 @@ Things that were wrong in what had been assumed, besides the latch:
 * The debug serial port is on none of the eight pads looked at.
 * Two beacons with the old `board_init` ended in a reset within a
   fraction of a second of the hand-over, where the probe before them
-  and everything after handed over.  Whether that was the watchdog
-  (the strobe in the stub came with the next disc, and so did other
-  changes) is not known.
+  and everything after handed over.  That was the watchdog, as good as
+  certainly: it waits 105 to 115 ms (measured since), the hand-over's
+  copy with interrupts off takes 107 to 112, and the stub has strobed
+  as it copies since the disc after those two.
 * `can_send` gave a frame up after 100 ms, and the next frame, asked
   for at once, did not go out: the controller cancels when the attempt
   it is making is over.  `can_send` now waits for that, and the
@@ -597,8 +599,21 @@ Things that were wrong in what had been assumed, besides the latch:
    works from a program: sent by a key of the drive's log, it had the
    drive ready 5.65 s later.
 
-Not tried on the unit: the knobs, receiving on CAN, reading after a
-disc has been changed.
+8. **The suite** (`sdk/examples/suite`): ten measurements in 39 s, all
+   of them answered, 123 records on the bus.  What the emulator took
+   from it: the watchdog waits 105 to 115 ms, not 1.5 s; the drive
+   calls itself `ALPINE  DV33M01B/`, reads 256 sectors in a row in
+   1342 ms and needs 200 to 280 ms to get somewhere else on a small
+   disc; the A/D converter's idle inputs; the processor's clock chip
+   is not running; the faceplate controller has its settings 340 ms
+   after its start.  What it could only note: the processor is a sixth
+   faster than the emulator's in a loop and four times slower past the
+   cache (`docs/hardware.md`, "CPU"), and the radio processor's status
+   block as it really is.  Every key and both knobs answered, with the
+   SDK's numbers for them.
+
+Not tried on the unit: receiving on CAN, `cd_wait_ready` after a disc
+has been changed.
 
 ## What this does and does not establish
 
