@@ -310,7 +310,9 @@ or the sense data (`2/3A/00` no disc, `2/04/00` not ready, `2/04/01`
 becoming ready, `6/28/00` the medium may have changed).  CD EJECT has the drive push
 the disc out; take it and push it back in, as often as there is room
 on the screen (eleven lines; the log wraps), with the update disc and
-with other discs.  SETUP, with the update disc in the drive, hands over
+with other discs.  NEXT times the drive reading 256 sectors, which is the
+number the emulated drive's speed is still waiting for (1.5 ms a sector
+is a guess).  SETUP, with the update disc in the drive, hands over
 to the stock loader; without a key it does so after ten minutes
 (`-DMINUTES=n`).  The lines also go to the debug serial port and to
 the CAN bus (identifier 0x7F5: line number, time in three bytes, the

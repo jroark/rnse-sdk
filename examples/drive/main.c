@@ -19,6 +19,10 @@
  *   RETURN     done, without an update: the unit starts again as it
  *              is (and, with the disc in the drive, the program after
  *              it: see restart in rnse.h)
+ *   NEXT       how fast the drive reads: 256 sectors from sector 16
+ *              on, sixteen at a time, timed (a line READ and the
+ *              milliseconds; on the bus kind 3 with the time in the
+ *              three bytes of the sense data)
  *
  * Every 100 ms the drive is asked TEST UNIT READY and, if it is not,
  * REQUEST SENSE.  A line is written for every change: the time in
@@ -45,6 +49,9 @@ static const u8 test_unit_ready[12] = { 0x00 };
 static const u8 request_sense[12] = { 0x03, 0, 0, 0, 18 };
 static const u8 allow_removal[12] = { 0x1e };
 static const u8 eject[12] = { 0x1b, 1, 0, 0, 2 };
+
+/* Sixteen sectors at a time for the reading test. */
+static u8 sectors[16 * 2048];
 
 static int s;
 #define ROWS 11
@@ -84,6 +91,17 @@ static void log_line(u32 ms, int kind, u8 key, u8 code, u8 qualifier)
         const char *q = "READY";
         while (*q)
             *p++ = *q++;
+    } else if (kind == 3 || kind == 4) {
+        /* The reading test: its time, or that it failed. */
+        const char *q = kind == 3 ? "READ 256 IN " : "READ FAILED";
+        while (*q)
+            *p++ = *q++;
+        if (kind == 3) {
+            p = put_dec(p, (u32)key << 16 | (u32)code << 8 | qualifier, 6);
+            *p++ = ' ';
+            *p++ = 'M';
+            *p++ = 'S';
+        }
     } else if (kind == 2) {
         const char *q = "NO ANSWER";
         while (*q)
@@ -116,7 +134,7 @@ static void log_line(u32 ms, int kind, u8 key, u8 code, u8 qualifier)
 int main(void)
 {
     u32 start, next = 0, last = 0xffffffff;
-    int was_eject = 0, again = 0;
+    int was_eject = 0, was_next = 0, again = 0;
 
     board_init();
     console_puts("\nrnse sdk: drive\n");
@@ -124,6 +142,7 @@ int main(void)
     screen_palette(1, 255, 255, 255);
     screen_palette(2, 255, 96, 0);
     screen_text(4 * s, 2 * s, "DRIVE LOG  CD EJECT: OUT  SETUP: UPDATE  RETURN: RESTART", 2, s);
+    screen_text(4 * s, 11 * s, "NEXT: READING TEST", 2, s);
     panel_init();
     can_init();
     cd_init();
@@ -138,6 +157,15 @@ int main(void)
             cd_command(eject, 0, 0);
         }
         was_eject = panel_key(KEY_CD_EJECT);
+        if (panel_key(KEY_NEXT) && !was_next) {
+            u32 t0 = millis(), t;
+            int i, r = 0;
+            for (i = 0; i < 16 && r == 0; i++)
+                r = cd_read(16 + 16 * (u32)i, 16, sectors);
+            t = millis() - t0;
+            log_line(millis() - start, r ? 4 : 3, (u8)(t >> 16), (u8)(t >> 8), (u8)t);
+        }
+        was_next = panel_key(KEY_NEXT);
         if (panel_key(KEY_RETURN))
             again = 1;
 #ifdef RESTART
