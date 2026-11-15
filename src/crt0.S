@@ -67,6 +67,11 @@ _start:
         ! masked until board_init has set the hardware up.
         mov.l   8f, r0
         ldc     r0, sr
+        ! A program installed in flash counts its starts before anything
+        ! else (flash.c): nothing for one started any other way.
+        mov.l   13f, r0
+        jsr     @r0
+         mov    r8, r4
         mov.l   9f, r0
         jsr     @r0
          nop
@@ -82,6 +87,7 @@ _start:
 9:      .long   main
 11:     .long   start_args
 12:     .long   start_state
+13:     .long   firmware_guard
 
 ! Allow interrupts of every level (called by board_init at its end).
         .global irq_enable

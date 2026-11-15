@@ -247,6 +247,77 @@ card: the display's vertical syncs, what a sector from each card takes,
 and the time of an access to each part of the bus.  No hands wanted; it
 restarts the unit when it is done.
 
+## A program in flash
+
+Everything above is a program that a disc or a card brings each time.
+`rnse firmware disc.iso V222 program.bin out.iso --index NNNN` makes an
+update disc of a program instead: the disc's operating system module
+is replaced by one of the same length that holds the program behind a
+few instructions (`fw::firmware_module`), everything else on the disc
+is as it was.  The unit's software takes the disc for an update, its
+loader writes the module where the operating system was, and from then
+on the boot ROM, which starts whatever is there with a right checksum
+(`docs/boot-rom.md`), starts the program: the instructions copy it to
+the loader's place in RAM, where every program of the SDK runs, and
+jump to it.  No disc, no card, at every start.  The 192 only.
+
+The stock software is gone then, except for the modules the program
+does not replace (the card processors' program is in one of them,
+which is where `sd_init` finds it).  Three ways lead back, and all
+three end in the boot ROM installing the update disc that is in the
+drive:
+
+* `firmware_remove()` and `restart()`: the program erases the 8 KiB
+  sector with the directory of the installed software, and the ROM,
+  finding no software, reads the loader from the disc and runs it.
+  `sdk/examples/installed` does it when RETURN is held.
+* The guard (`sdk/src/flash.c`, called by the start-up code before
+  `main`).  A program in flash counts its starts in the battery-backed
+  memory (at 0x3ff00, above all the stock software uses) and sets the
+  count back when it calls `firmware_healthy()`.  The fifth start in a
+  row that did not get that far takes the program out as above.  That
+  is for a program that hangs or dies: nothing in the ROM would take
+  it away (a program that hangs is reset by the watchdog and started
+  again, 1276 times in three minutes of the emulator).
+* By hand, through the same guard: off and on four times, each time
+  before the program calls itself healthy (ten seconds in, in the
+  example), is the way out of a program that runs and cannot be
+  operated.
+
+In the emulator, under a unit's boot ROM and with arbitrary RAM and the
+caches modelled, all of it runs (`tests/disc.rs`,
+`a_program_is_installed_in_flash_and_taken_out_again` and
+`a_program_in_flash_that_never_gets_going_takes_itself_out`): the
+install through the stock software and its loader, the program from
+flash with its picture and the faceplate answering, the way out by the
+key, and the guard; afterwards the flash holds the stock software byte
+for byte and it starts.
+
+**None of it has been near a unit, and this is the one part of the SDK
+that can leave a unit without software.**  What the emulator cannot
+vouch for:
+
+* That a real boot ROM installs from a disc when it finds no software.
+  It is that unit's ROM that does it in the emulator, and it is what
+  an update that lost its power halfway has to rely on; but nobody has
+  watched a unit do it, and every way back goes through it.
+* The erase.  The commands are the stock loader's; the emulator's
+  flash is done at once, a real sector takes a quarter of a second and
+  answers with its status meanwhile, which the routine waits out
+  without ever having seen it.
+* The guard's cell.  That the battery-backed memory is there at
+  0x3ff00 and keeps what is written is by the part's size and by what
+  the stock software uses, not by a write.
+* What the hardware wants at a start without the stock software.  A
+  program from a disc or a card finds the radio processor, the
+  faceplate controller and the card processors as that software left
+  them; a program from flash finds them as the boot ROM leaves them.
+  In the emulator the faceplate answers; the radio processor's
+  amplifier and the card processors have not been tried from there.
+
+The first two can only be tried by doing them.  The third and fourth
+can be tried from a card first, and should be.
+
 ## Building and running
 
 You need an SH-4 GCC that can produce big-endian code without its

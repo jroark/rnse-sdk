@@ -139,6 +139,22 @@ extern u32 sd_heard_n;
 int sd_play_poll(void);
 void sd_play_stop(void);
 
+/* For a program installed in flash (`rnse firmware`, 192): take it out
+ * again.  Erases the directory of the installed software, after which
+ * the boot ROM takes the unit for empty and installs from the update
+ * disc in the drive at the next start.  0 when the sector is erased.
+ * Call restart() after it, with a stock update disc in the drive. */
+int firmware_remove(void);
+/* Was the program started from flash by the boot ROM?  And: it runs.
+ * A program in flash counts its starts (flash.c, firmware_guard) and
+ * takes itself out at the fifth in a row that did not get as far as
+ * firmware_healthy(): call it once the program has shown that it
+ * works, ten seconds in, say.  Until then four quick switchings off
+ * and on are the way out of a program that cannot be operated. */
+int firmware_installed(void);
+void firmware_healthy(void);
+void firmware_guard(u32 arg);
+
 /* The radio processor (192): tuner, amplifier and power.  A command
  * with its data; the answer's data goes to `answer` and its length is
  * returned, negative when no answer came in three tries. */
