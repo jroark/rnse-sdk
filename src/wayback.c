@@ -26,6 +26,9 @@
 extern const u32 way_back_offset[2];
 extern const char _load[];
 extern const u32 way_back_stub[], way_back_stub_end[];
+/* From the hardware layer: the port with the watchdog's strobe in bit 0
+ * and a port whose bits 3 and 2 can be watched from outside, or 0. */
+extern const u32 way_back_strobe, way_back_marker;
 void irq_disable(void);
 
 u32 start_args[3];
@@ -134,6 +137,9 @@ int stock_update(void)
     params[5] = start_args[1];
     params[6] = start_args[2];
     params[7] = way_back_scratch - 16;
+    params[8] = way_back_strobe;
+    params[9] = way_back_marker;
+    params[10] = way_back_marker ? (u32)(REG8(way_back_marker) | 0x0c) : 0;
     ((void (*)(u32, u32, u32, u32))(u32)stub)((u32)loader, UNCACHED(_load), (length + 3) >> 2, (u32)params);
     return -3; /* not reached */
 }

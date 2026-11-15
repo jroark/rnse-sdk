@@ -4,8 +4,10 @@
 the emulator and put it on a disc for a real unit: start-up code, a
 small hardware layer for each generation of the unit, and an example.
 
-Read the section "What this does and does not establish" before
-taking a disc to a car.  Nothing here has been run on real hardware.
+Read the sections "On a real unit" and "What this does and does not
+establish" before taking a disc to a car.  The 192's side has run on
+one real unit, a North American one on a bench; the 193's has not run
+on any.
 
 ## Where the program runs, and what starts it
 
@@ -32,8 +34,10 @@ The index is what makes the disc an update.  The installed software
 compares the second and third digits of the disc's four with its own
 and wants the disc's higher: a unit with 0650 takes 0660, not 0651.
 `rnse info` shows a disc's index for each variant; a unit's own is the
-`SOFIDX` of the update it last took (presumably the software number its
-version display shows, which has not been checked).  The same disc with an index that is not higher is
+`SOFIDX` of the update it last took, and that is the number its version
+display shows as `SW:` (a unit that took a disc with software 0371 and
+index 0350 showed 0350, and 0360 after the same software with that
+index).  The same disc with an index that is not higher is
 ignored and the unit starts as always.
 
 A program started this way finds the machine as the running operating
@@ -159,7 +163,10 @@ back"); `sdk/examples/hello` draws a test picture and counts seconds;
 `sdk/examples/keys` shows what the faceplate reports (`sdk/build.sh 193
 keys`, and `--key SETUP@1500 --knob 1:3@2500` on the `rnse loader`
 command line to press and turn); `sdk/examples/cd` reads the disc the
-program came on; `sdk/examples/can` lists the frames on the bus and
+program came on; `sdk/examples/beacon` is the
+probe that says on the CAN bus how far it has got, for a logic
+analyser on the two wires and no other node ("On a real unit");
+`sdk/examples/can` lists the frames on the bus and
 sends the one with which the stock software reports itself (`--can
 351:4500000000000000@300` on the command line puts a frame on the
 emulated bus every 300 ms, `--can-alone` takes every other node away).
@@ -316,6 +323,10 @@ up when a loader starts; and, with the ROM, everything about the boot
 ROM that `docs/boot-rom.md` has had to infer.  A boot ROM image is
 firmware like the rest and must not go into the repository.
 
+A unit's report has been taken ("On a real unit"), and its boot ROM
+runs in the emulator (`docs/boot-rom.md`, "The real one, in the
+emulator").
+
 In the emulator the program reads back the emulator's own stand-ins
 (`tests/disc.rs`, `report_program_sends_the_boot_rom`), which proves
 the plumbing and nothing about a unit.  The registers of the 192's
@@ -450,6 +461,82 @@ not `--strict` is given:
   receiver on and the FIFO out of reset; the faceplate controller is
   silent until its reset line is released.
 
+## On a real unit
+
+One unit so far: a North American 192 (V222) with software index 0260,
+on a bench, alone on its CAN bus, with a logic analyser on the bus and
+on eight test pads, and the update disc with V222 software 0371.  What
+happened, in order, because the failures say more than the success:
+
+1. **The probe, as it then was.**  The stock software took the disc
+   (index 0300) and started the program.  The screen went dark and
+   stayed so; a minute and a half later the unit reset and started as
+   usual, with the old index.  The disc came out on request: after a
+   start the stock software needs some 40 s before it starts the
+   program again, and it obeys the eject key until then.  So on a bench
+   the trap of "The way back" has a door.
+2. **Why dark.**  `board_init` wrote the latch at 0x16000004 with the
+   value the stock loader's write has in the emulator.  The loader adds
+   a bit to what is there; the value took the faceplate controller's
+   reset line down with it, and the lighting is that controller's
+   (`docs/hardware.md`, "The latch at 0x16000004").  The picture itself
+   was there all along: started again (`panel_init`), the controller
+   lit it.
+3. **Why no update.**  The hand-over worked from the first disc on: the
+   stock loader ran, 90.6 s each time, without reading the disc, and
+   reset the unit.  The same latch: with `board_init` adding its bit
+   and leaving the rest, the loader that the program starts does the
+   whole update, in the 148 s it also takes when the stock software
+   starts it.
+4. **What works now** (`sdk/examples/beacon`, the SDK as it is): the
+   stock software starts the program; the picture matches the emulator's
+   as far as a photograph shows; the tick is right (CAN
+   frames a hundred ticks apart were 1.00003 s apart); the faceplate
+   controller takes its settings within a second; the CAN controller
+   sends; `stock_update` hands over (the stub needs 4.9 ms for the
+   caches and 107 to 112 ms for the copy, uncached and with interrupts
+   off, which is why it now puts edges on the watchdog's strobe) and
+   the unit updates itself from the disc and has the disc's index.
+
+Things that were wrong in what had been assumed, besides the latch:
+
+* A unit alone on a bench lets its CAN bus sleep after 4.7 s, and from
+  then on the transceiver passes nothing.  The beacon wakes it (two
+  port bits) before anything else; those two lines are on test pads,
+  so their rising is the moment a program starts, and the hand-over
+  shows its three steps on them.
+* The debug serial port is on none of the eight pads looked at.
+* Two beacons with the old `board_init` ended in a reset within a
+  fraction of a second of the hand-over, where the probe before them
+  and everything after handed over.  Whether that was the watchdog
+  (the strobe in the stub came with the next disc, and so did other
+  changes) is not known.
+* `can_send` gave a frame up after 100 ms, and the next frame, asked
+  for at once, did not go out: the controller cancels when the attempt
+  it is making is over.  `can_send` now waits for that, and the
+  report's stream, sent to nobody at 3 ms a frame, arrived whole.
+
+5. **The report** (`sdk/examples/report`, three rounds of pages).  It
+   ran through, card processors included, and handed over; the update
+   followed.  Nobody acknowledged, so it sent each frame for 3 ms and
+   went on (`can_send_for`); a logic analyser on the bus had 6.8 rounds
+   of the stream in the 265 s, some 3.9 ms a frame, and `rnse report`
+   put them together: all 104 registers, and the boot ROM's 49152
+   bytes with the check sum the unit computed itself.  Among the
+   answers: PVR 0x04050086, PRR 0x00000200, CVR 0x20480000 (the
+   emulator answers 0x04050005, 0x100, 0x35100000); the clock register
+   0x0e0a, as assumed; each card processor's crystal loop in 21846327
+   counts of timer 0, which makes the peripheral clock 58.803 MHz; the
+   card processors' pins 0x3f, multiplier 3, the second loop 3.000
+   times as fast, all as the emulator has them, and their clock
+   control register 0x0100 after a reset where the emulator has 0.
+   The bus controller's registers, the ports' directions and the
+   interrupt priorities are in the report too; none of it has been
+   compared with the emulator's models yet.
+
+Not tried on the unit: the keys and knobs, the drive from a program,
+receiving on CAN, the drive's log.
+
 ## What this does and does not establish
 
 Established, by the tests in `tests/disc.rs`: the examples build and
@@ -462,26 +549,31 @@ state that software leaves and writes nothing to flash.
 
 Not established:
 
-* **That a real unit gets as far as the emulated one.**  The decision
+* **That every real unit gets as far as the emulated one.**  One North
+  American 192 does ("On a real unit"): switched on, showing the radio,
+  no ignition, nothing else on the bus.  For the European 192 and the
+  193 the decision
   to start the loader is the stock software's own code, running
   unmodified, so that part is as good as the emulation of what it needs
   on the way: the drive, the interrupt and DMA controllers, the boot
-  ROM services.  A real unit may differ in ways this never touched; it
-  might, say, need the ignition on or a particular screen.  And what
+  ROM services.  A real unit may differ in ways this never touched.  And what
   the stock software has put in the unit's battery-backed memory over
   the years is not what the emulator starts with.
 * **That the bring-up is sufficient.**  It is the stock loader's, minus
-  the parts the example has no use for (the drive, CAN, DMA).  If the
-  picture needs one of those, or needs the loader's exact timing, the
-  emulator will not show it.
+  the parts the example has no use for (the drive, CAN, DMA).  On the
+  192 it has shown its picture on a unit.  The lesson of that unit
+  applies to the rest of both hardware layers, the 193's above all,
+  which nobody has checked for it: a write recorded from a loader
+  running on its own in the emulator may be a read and a write on a
+  unit, and what it leaves alone there matters.
 * **Timing.**  The emulated CPU executes one instruction per clock
   cycle at an estimated clock (`--cpu-ratio` tries others); the
   watchdog's real period and the display's real requirements are
   unknown.  The timers' clock is known on the 193, where the unit's own
   sound output measures it (50 MHz, a tick of 1 ms for the stock
-  software); on the 192 it follows from the two units' software having
-  the same timer values in the ratio of their clocks (58.8 MHz) and is
-  not measured.  The emulator had both at half that until the sound
+  software); on the 192 it is 58.8 MHz, as the two units' software
+  having the same timer values in the ratio of their clocks suggested
+  and a unit has since confirmed.  The emulator had both at half that until the sound
   output was modelled, and the SDK's "10 ms" tick was 5 ms then; it is
   10 ms by the corrected clocks.
 * **The faceplate in the loader's place.**  The link's set-up is the

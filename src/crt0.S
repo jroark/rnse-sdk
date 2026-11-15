@@ -116,6 +116,20 @@ irq_disable:
         .global way_back_stub, way_back_stub_end
         .align  2
 way_back_stub:
+        ! The watchdog's strobe (a byte port, bit 0) and two port bits
+        ! to show progress on, where the unit has them (192): else 0.
+        mov.l   @(32, r7), r10
+        mov.l   @(36, r7), r11
+        mov.l   @(40, r7), r12
+        mov.w   7f, r13
+        ! Progress 1: the stub runs (bit 3 low).
+        tst     r11, r11
+        bt      10f
+        mov     r12, r0
+        mov     #-9, r1
+        and     r1, r0
+        mov.b   r0, @r11
+10:
         ! What the data cache holds of the place goes to memory and out
         ! of the cache, so that nothing is written back later over what
         ! is about to be put there.
@@ -140,11 +154,37 @@ way_back_stub:
         nop
         nop
         nop
+        ! Progress 2: the caches are done with (both bits low).
+        tst     r11, r11
+        bt      11f
+        mov     r12, r0
+        mov     #-13, r1
+        and     r1, r0
+        mov.b   r0, @r11
+11:
+        ! The copy, with an edge on the watchdog's strobe every 4096
+        ! words: this code runs uncached and interrupts are off, so on
+        ! a real unit the copy takes its time and nothing else strobes.
 2:      mov.l   @r4+, r0
         mov.l   r0, @r5
-        dt      r6
-        bf/s    2b
-         add    #4, r5
+        add     #4, r5
+        tst     r13, r6
+        bf      12f
+        tst     r10, r10
+        bt      12f
+        mov.b   @r10, r0
+        xor     #1, r0
+        mov.b   r0, @r10
+12:     dt      r6
+        bf      2b
+        ! Progress 3: the stock loader is in place (bit 3 high, bit 2 low).
+        tst     r11, r11
+        bt      13f
+        mov     r12, r0
+        mov     #-5, r1
+        and     r1, r0
+        mov.b   r0, @r11
+13:
         mov.l   @(8, r7), r8
         mov.l   @(12, r7), r9
         mov.l   @(28, r7), r15
@@ -159,6 +199,7 @@ way_back_stub:
         .align  2
 9:      .long   0xff00001c
 8:      .word   0x0800
+7:      .word   0x0fff
         .align  2
 way_back_stub_end:
 

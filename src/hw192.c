@@ -45,6 +45,11 @@
 
 /* For the way back (wayback.c): RAM starts at 0x8c000000; the stock loader lives from 0x8dd00000 up. */
 const u32 way_back_scratch = 0x8c400000;
+/* The strobe is port 0; bits 3 and 2 of port A are the CAN transceiver's
+ * mode lines (both high: awake), which are on test pads of the board, so
+ * the hand-over shows its progress there. */
+const u32 way_back_strobe = 0xb2300001;
+const u32 way_back_marker = 0xb2a00001;
 
 const int screen_width = 400, screen_height = 235;
 
@@ -70,6 +75,17 @@ void interrupt(void)
 u32 millis(void)
 {
     return ticks;
+}
+
+u32 micros(void)
+{
+    u32 t, c;
+    do {
+        t = ticks;
+        c = REG32(TCNT0);
+    } while (t != ticks);
+    /* The timer counts 146999 down to 0 in 10 ms: 14.7 a microsecond. */
+    return t * 1000 + udiv((146999 - c) * 10, 147);
 }
 
 void console_putc(char c)
@@ -221,11 +237,16 @@ void can_init(void)
     REG16(CAN + 0x52) = 0xfffe;
     REG16(CAN_MB(1) + 0x04) = 0x2000; /* sends */
     REG16(COMPANION_INTC + 0x12) = 0x0500;
+    /* The transceiver awake: bits 3 and 2 of port A, set as the loader
+     * and the installed software set them.  The installed software
+     * lets the bus sleep when it is alone on it (after 4.7 s on a
+     * bench), and nothing gets out of a sleeping transceiver. */
+    REG8(0xb2a00001) |= 0x0c;
 }
 
-int can_send(u16 id, const u8 *data, int len)
+int can_send_for(u16 id, const u8 *data, int len, u32 us)
 {
-    u32 start = millis();
+    u32 start = micros();
     int i;
     REG16(CAN_MB(1) + 0x00) = (u16)(id << 4);
     REG16(CAN_MB(1) + 0x02) = 0;
@@ -234,14 +255,27 @@ int can_send(u16 id, const u8 *data, int len)
     REG16(CAN_MB(1) + 0x04) = (u16)(0x2000 | (len & 15));
     REG16(CAN + 0x22) = 0x0002; /* transmit request, mailbox 1 */
     while (!(REG16(CAN + 0x32) & 0x0002)) {
-        if (millis() - start > 100) {
+        if (micros() - start > us) {
             REG16(CAN + 0x2a) = 0x0002; /* cancel */
+            /* The controller cancels when the attempt it is making is
+             * over, a good millisecond later; a frame asked for before
+             * that never goes out (on a unit every second frame of a
+             * row was missing).  So: until the request is gone or the
+             * cancellation is flagged, 20 ms at most. */
+            start = micros();
+            while ((REG16(CAN + 0x22) & 0x0002) && !(REG16(CAN + 0x3a) & 0x0002) && micros() - start < 20000)
+                ;
             REG16(CAN + 0x3a) = 0x0002;
             return -1;
         }
     }
     REG16(CAN + 0x32) = 0x0002; /* acknowledged: flag taken back */
     return 0;
+}
+
+int can_send(u16 id, const u8 *data, int len)
+{
+    return can_send_for(id, data, len, 100000);
 }
 
 int can_take(u16 *id, u8 *data)
@@ -295,14 +329,23 @@ void board_init(void)
     REG16(UART5 + 0x04) = 0x0020;
 
     /* Output latches and port 8 as the loader sets them; which lines
-     * these are is mostly unknown (docs/hardware.md, "Ports"). */
+     * these are is mostly unknown (docs/hardware.md, "Ports").
+     *
+     * The latch at 0xb6000004 and port 8 get bits added, not values:
+     * the stock loader reads the latch and writes it back with bit 4
+     * set, so everything else in it is as the installed software left
+     * it.  Writing the bare value here, which is what the loader's
+     * writes look like when it is started on its own in the emulator,
+     * took the rest away on a real unit: the faceplate controller went
+     * into reset (bit 0) and the screen dark, and the stock loader,
+     * started afterwards for the way back, sat for 90 seconds without
+     * reading the disc and gave up. */
     REG8(LATCHES + 0) = 0x1f;
     for (i = 2; i <= 6; i++)
         REG8(LATCHES + i) = 0x1f;
-    REG8(PORT8_DATA) = 0x00;
-    REG8(PORT8_DATA) = 0x20;
-    REG8(PORT8_DATA) = 0x60;
-    REG32(0xb6000004) = 0x00000010;
+    REG8(PORT8_DATA) |= 0x20;
+    REG8(PORT8_DATA) |= 0x40;
+    REG32(0xb6000004) |= 0x00000010;
 
     /* Coral.  The first three writes go to its host interface (a key,
      * then two set-up bytes), with the watchdog strobe raised around
@@ -311,7 +354,7 @@ void board_init(void)
     REG8(CORAL_HOST + 0x07) = 0x02;
     REG8(CORAL_HOST + 0x27) = 0x1f;
     REG8(PORT0_DATA) = 0x01;
-    REG32(0xb6000004) = 0x00000010;
+    REG32(0xb6000004) |= 0x00000010;
     REG8(CORAL_HOST + 0x2f) = 0x01;
     /* Display timing: 400 of 508 pixels a line, 235 of 263 lines. */
     REG16(CORAL_DISP + 0x02) = 0x1800;

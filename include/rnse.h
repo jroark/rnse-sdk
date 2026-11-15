@@ -26,6 +26,9 @@ void board_init(void);
 /* Milliseconds since board_init, in steps of 10. */
 u32 millis(void);
 void delay_ms(u32 ms);
+/* Microseconds since board_init, from the tick and its timer's count;
+ * wraps after 71 minutes, so use differences. */
+u32 micros(void);
 /* Stop the CPU until the next interrupt (the tick, at the latest). */
 void cpu_idle(void);
 
@@ -115,6 +118,11 @@ void can_init(void);
 /* 0 = sent and acknowledged by another node; -1 = not within 100 ms
  * (nobody else on the bus, or the bus is down), and given up. */
 int can_send(u16 id, const u8 *data, int len);
+/* The same with the time to wait for the acknowledgement, in
+ * microseconds.  A frame of eight bytes takes some 1.3 ms on the bus
+ * and is on it at least once after 3 ms, acknowledged or not: that is
+ * how to send to a logic analyser, which acknowledges nothing. */
+int can_send_for(u16 id, const u8 *data, int len, u32 us);
 /* The length of the oldest frame waiting (0..8), its identifier and
  * data stored; -1 when there is none. */
 int can_receive(u16 *id, u8 *data);

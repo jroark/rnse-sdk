@@ -51,6 +51,9 @@
 
 /* For the way back (wayback.c): RAM starts at 0x08000000; the stock loader lives from 0x09b60000 to below 0x0a000000, the picture is at 0x08110000. */
 const u32 way_back_scratch = 0x0a800000;
+/* The hand-over neither strobes nor shows its progress on this unit yet. */
+const u32 way_back_strobe = 0;
+const u32 way_back_marker = 0;
 
 const int screen_width = 800, screen_height = 480;
 
@@ -78,6 +81,17 @@ void interrupt(void)
 u32 millis(void)
 {
     return ticks;
+}
+
+u32 micros(void)
+{
+    u32 t, c;
+    do {
+        t = ticks;
+        c = REG32(TCNT0);
+    } while (t != ticks);
+    /* The timer counts 124875 down to 0 in 10 ms: 12.5 a microsecond. */
+    return t * 1000 + udiv((124875 - c) * 2, 25);
 }
 
 void console_putc(char c)
@@ -266,9 +280,9 @@ void can_init(void)
     REG32(INT2MSKCR) = 0x02000000;
 }
 
-int can_send(u16 id, const u8 *data, int len)
+int can_send_for(u16 id, const u8 *data, int len, u32 us)
 {
-    u32 start = millis();
+    u32 start = micros();
     int i;
     REG16(CAN_MB(1) + 0x00) = (u16)(id << 2);
     for (i = 0; i < len && i < 8; i++)
@@ -276,14 +290,24 @@ int can_send(u16 id, const u8 *data, int len)
     REG16(CAN_MB(1) + 0x10) = (u16)(len & 15);
     REG32(CAN + 0x20) = 0x00000002; /* transmit request, mailbox 1 */
     while (!(REG16(CAN + 0x32) & 0x0002)) {
-        if (millis() - start > 100) {
+        if (micros() - start > us) {
             REG32(CAN + 0x28) = 0x00000002; /* cancel */
+            /* As on the 192, where a unit showed it: the next frame
+             * only once this one is really gone, 20 ms at most. */
+            start = micros();
+            while ((REG16(CAN + 0x22) & 0x0002) && !(REG16(CAN + 0x3a) & 0x0002) && micros() - start < 20000)
+                ;
             REG16(CAN + 0x3a) = 0x0002;
             return -1;
         }
     }
     REG16(CAN + 0x32) = 0x0002; /* acknowledged: flag taken back */
     return 0;
+}
+
+int can_send(u16 id, const u8 *data, int len)
+{
+    return can_send_for(id, data, len, 100000);
 }
 
 int can_take(u16 *id, u8 *data)

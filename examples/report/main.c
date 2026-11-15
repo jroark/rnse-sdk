@@ -262,7 +262,17 @@ static void hex_page(u32 page, u32 pages)
 
 /* The stream on the bus: one frame at a time, in an endless round. */
 static int listener;
+/* Nobody acknowledges (a logic analyser on the wires and no other
+ * node): each frame is given 3 ms, in which it is on the bus at least
+ * once, and the stream goes on regardless. */
+static int blind;
 static u32 stream, pass;
+
+static int xmit(u16 id, const u8 *d)
+{
+    int r = can_send_for(id, d, 8, blind ? 3000 : 100000);
+    return blind ? 0 : r;
+}
 
 static int send_next(void)
 {
@@ -278,7 +288,7 @@ static int send_next(void)
         d[5] = (u8)(rom_size >> 8);
         d[6] = (u8)rom_size;
         d[7] = (u8)pass;
-        if (can_send(0x7f1, d, 8))
+        if (xmit(0x7f1, d))
             return -1;
     } else if (at <= (u32)(2 * (nregs + nextra))) {
         /* The registers, then the values that have made-up addresses. */
@@ -289,13 +299,13 @@ static int send_next(void)
         for (i = 0; i < 4; i++)
             d[2 + i] = (u8)(v >> (24 - 8 * i));
         d[6] = d[7] = 0;
-        if (can_send((at - 1) & 1 ? 0x7f3 : 0x7f2, d, 8))
+        if (xmit((at - 1) & 1 ? 0x7f3 : 0x7f2, d))
             return -1;
     } else if (at == (u32)(2 * (nregs + nextra)) + 1) {
         d[0] = d[1] = d[2] = d[3] = 0;
         for (i = 0; i < 4; i++)
             d[4 + i] = (u8)(rom_crc >> (24 - 8 * i));
-        if (can_send(0x7f4, d, 8))
+        if (xmit(0x7f4, d))
             return -1;
     } else {
         u32 off = (at - (u32)(2 * (nregs + nextra)) - 2) * 5;
@@ -304,7 +314,7 @@ static int send_next(void)
         d[2] = (u8)off;
         for (i = 0; i < 5; i++)
             d[3 + i] = off + (u32)i < rom_size ? ROM[off + (u32)i] : 0xff;
-        if (can_send(0x7f0, d, 8))
+        if (xmit(0x7f0, d))
             return -1;
         if (off + 5 >= rom_size) {
             stream = 0;
@@ -316,20 +326,20 @@ static int send_next(void)
     return 0;
 }
 
-/* Show a page for a while; meanwhile the stream goes on if anybody
- * listens, and if nobody did, one more try is made. */
+/* Show a page for a while; meanwhile the stream goes on, with
+ * acknowledgements if anybody gives them and without if not. */
 static void hold(u32 seconds)
 {
     u32 until = millis() + seconds * 1000;
-    if (!listener)
+    if (!listener && !blind) {
         listener = send_next() == 0;
-    line(28, listener ? "CAN: SENDING" : "CAN: NOBODY LISTENS", 3, 1);
+        blind = !listener;
+    }
+    line(28, listener ? "CAN: SENDING" : "CAN: SENDING, NOBODY ANSWERS", 3, 1);
     while ((s32)(millis() - until) < 0) {
-        if (listener) {
-            if (send_next())
-                listener = 0;
-        } else {
-            cpu_idle();
+        if (send_next()) {
+            listener = 0;
+            blind = 1;
         }
     }
 }
