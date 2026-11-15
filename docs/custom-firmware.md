@@ -330,6 +330,24 @@ thing is what the drive's model needs: what the drive says while it
 loads (`2/04/00`, as assumed, or `2/04/01`, or still `2/3A/00`), for
 how long, and whether `6/28/00` comes before that or after.
 
+### Many questions in one run
+
+`sdk/examples/suite` is for a unit on a bench with a logic analyser on
+its CAN wires: ten measurements one after the other, every answer a
+record on the bus (frames 0x7F8, sent to nobody like the report's), on
+the screen and on the debug serial port.  The processor's speed with
+and without the cache, the A/D converter's inputs, the ports and the
+registers at 0xb6000000, the clock chip against the timer, the
+faceplate controller's start, what the radio processor says on its
+line when nobody asks, the drive's name and its reading times at three
+places of the disc, the CAN controller's counters, thirty seconds in
+which keys and knobs are logged, and at the end the watchdog: the
+strobe stops and records follow every 10 ms until the unit is reset,
+which is how long the watchdog waits (the emulator's 1.5 s is a
+guess).  It writes nothing anywhere and ends in a restart, so the disc
+can be used again.  `tests/disc.rs` runs it against the emulator's own
+models; the header of `main.c` has the records.
+
 ### What it would settle
 
 Which processor is in the Aisin-marked package

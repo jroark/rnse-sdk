@@ -29,6 +29,10 @@ void delay_ms(u32 ms);
 /* Microseconds since board_init, from the tick and its timer's count;
  * wraps after 71 minutes, so use differences. */
 u32 micros(void);
+/* Set, the tick leaves the watchdog's strobe alone: the unit is reset
+ * when the watchdog has waited long enough.  For measuring how long
+ * that is, and for nothing else. */
+extern volatile int watchdog_hold;
 /* Stop the CPU until the next interrupt (the tick, at the latest). */
 void cpu_idle(void);
 

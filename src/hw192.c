@@ -54,6 +54,7 @@ const u32 way_back_marker = 0xb2a00001;
 const int screen_width = 400, screen_height = 235;
 
 static volatile u32 ticks;
+volatile int watchdog_hold;
 
 void interrupt(void)
 {
@@ -63,7 +64,8 @@ void interrupt(void)
         REG16(TCR0) &= (u16)~0x0100;
         ticks += 10;
         /* The watchdog wants an edge on its strobe regularly. */
-        REG8(PORT0_DATA) ^= 1;
+        if (!watchdog_hold)
+            REG8(PORT0_DATA) ^= 1;
     } else if (code == 0x340) {
         /* Level 5: the CAN controller. */
         can_interrupt();

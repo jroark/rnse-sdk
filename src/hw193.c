@@ -59,6 +59,7 @@ const int screen_width = 800, screen_height = 480;
 
 static volatile u32 ticks;
 static u32 strobe;
+volatile int watchdog_hold;
 
 void interrupt(void)
 {
@@ -69,8 +70,10 @@ void interrupt(void)
         ticks += 10;
         /* The watchdog wants an edge on its strobe regularly; the stock
          * loader toggles it from this tick as well. */
-        strobe ^= 1;
-        REG32(WATCHDOG) = strobe;
+        if (!watchdog_hold) {
+            strobe ^= 1;
+            REG32(WATCHDOG) = strobe;
+        }
     } else if (code == 0x880) {
         can_interrupt();
     } else {
