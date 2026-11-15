@@ -175,8 +175,11 @@ loader, and both are still so; `sd_attach` resets nothing, throws away
 what the processor still had to say and asks for a sector, and finds
 out by trying whether the card counts in bytes or sectors.  `sdboot`
 tries that first and `sd_init` after it.  In the emulator it reads
-standard and high-capacity cards so, in 40 ms; on a unit it has not
-run.  Three
+standard and high-capacity cards so, in 40 ms.  On the unit it read
+that 512 MB card: 30 ms for the card, 50 ms for the file, and a round
+of the loop is 56.8 s with it, round after round.  It wants the card
+in its slot before the disc goes in, so that the stock software has
+started it.  Three
 things a unit taught on the way:
 
 - **A card's start wants the stock driver's pace.**  That driver leaves
