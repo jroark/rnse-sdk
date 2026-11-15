@@ -110,6 +110,10 @@ static void list(u8 *image)
     for (i = 0; files < MAX_FILES && sd_list((int)i, name, &size) == 0; i++) {
         if (name[8] != 'B' || name[9] != 'I' || name[10] != 'N' || name[0] == '_')
             continue;
+        /* A program fits in its place (0x1c000 bytes at most): a larger
+         * .BIN is data for one, a Linux kernel (VMLINUX.BIN) say. */
+        if (size < 32 || size > 0x1c000)
+            continue;
         if (same(name, "RNSE    BIN") && sd_load(name, image, 0x1c000, &size) == 0 && is_loader(image, size))
             continue;
         for (size = 0; size < 12; size++)
