@@ -178,6 +178,8 @@ extern int radio_answered;
  * at every start, the tuner as the source at the end.  The number of
  * frames that went unanswered; 99 when the first two did and the rest
  * was not tried. */
+extern int radio_refusal, radio_refusals;
+extern u16 radio_start_log[19];
 int radio_start(void);
 int radio_tune(int frequency);
 int radio_status(u8 *status, int max);

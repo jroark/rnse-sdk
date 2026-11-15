@@ -69,12 +69,26 @@ static int frame(u8 *data, int max, int *n, u32 ms)
  * for an acknowledgement. */
 int radio_answered;
 
+/* What it last refused a frame with (the acknowledgement's byte when
+ * it is not zero), and how often a frame had to be sent again for
+ * that.  A unit's radio processor refuses about half of the frames of
+ * a start, and the first one after it, and takes them a moment later:
+ * it is busy, not deaf.  (Seen on a unit: byte 0x07 for eight of the
+ * nineteen frames of radio_start, 0x08 for one, each taken when sent
+ * again 100 ms later.) */
+int radio_refusal, radio_refusals;
+
+/* How long an answer is waited for, and how often into silence. */
+static u32 patience = 600;
+static int tries = 3;
+
 int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max)
 {
-    int try, i, got, len = 0;
+    int try, i, got, len = 0, silent = 0;
     if (screen_width != 400)
         return -1; /* the 193's radio is spoken to differently, and not from here */
-    for (try = 0; try < 3; try++) {
+    /* Three times into silence, and for two seconds against refusals. */
+    for (try = 0; silent < tries && try < 20; try++) {
         u16 control = REG16(UART1 + 0x04);
         u8 sum = (u8)(0x01 + cmd + (n >> 8) + n);
         u32 start;
@@ -95,17 +109,29 @@ int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max)
         }
         /* Its answer, among whatever else it has to say. */
         start = millis();
-        while (millis() - start < 600) {
-            got = frame(answer, max, &len, 600 - (millis() - start));
+        while (millis() - start < patience) {
+            got = frame(answer, max, &len, patience - (millis() - start));
             if (got == cmd || (got == 0x20 && cmd != 0x20)) {
                 radio_answered = got;
                 REG16(UART1 + 0x04) = control;
-                return got == 0x20 && len && answer[0] ? -2 : len;
+                if (!(got == 0x20 && len && answer[0]))
+                    return len;
+                radio_refusal = answer[0];
+                radio_refusals++;
+                break;
             }
         }
         REG16(UART1 + 0x04) = control;
+        if (millis() - start >= patience) {
+            silent++;
+            continue;
+        }
+        start = millis();
+        while (millis() - start < 100)
+            if (sd_idle)
+                sd_idle();
     }
-    return -1;
+    return silent < tries ? -2 : -1;
 }
 
 int radio_source(int source, int volume)
@@ -149,7 +175,11 @@ int radio_status(u8 *status, int max)
  * of them is for is known of few (0x0b asks for the version, 0x88 for
  * the status, 0x19 [01 n] would be the volume), so they are sent as
  * they are.  Harmless after the installed software has done the same.
- * Returns how many of them went unanswered. */
+ * Returns how many of them were not taken; radio_start_log has, for
+ * each frame in order, 0x8000 if it was not, how often it was refused
+ * in bits 8 to 14 and the last refusal's byte. */
+u16 radio_start_log[19];
+
 int radio_start(void)
 {
     static const u8 frames[][5] = {
@@ -163,7 +193,7 @@ int radio_start(void)
     };
     u8 answer[64];
     u32 i;
-    int silent = 0;
+    int silent = 0, r, before;
     if (screen_width != 400)
         return -1;
     /* (Register for register as the stock software's set-up, but for
@@ -178,17 +208,33 @@ int radio_start(void)
     REG16(UART1 + 0x0c) = 0x0000;
     REG16(UART1 + 0x04) = 0x0018; /* the receiver; the transmitter for each frame */
     for (i = 0; i < sizeof frames / sizeof frames[0]; i++) {
-        if (radio_command(frames[i][0], frames[i] + 2, frames[i][1], answer, sizeof answer) < 0)
+        before = radio_refusals;
+        /* (0x8a is the one a unit's radio processor says nothing to:
+         * sent, as the stock software sends it, and not waited for.) */
+        if (frames[i][0] == 0x8a)
+            patience = 100, tries = 1;
+        r = radio_command(frames[i][0], frames[i] + 2, frames[i][1], answer, sizeof answer);
+        if (frames[i][0] == 0x8a)
+            patience = 600, tries = 3, r = r < 0 ? 0 : r;
+        radio_start_log[i] = (u16)((r < 0 ? 0x8000 : 0) | (radio_refusals - before) << 8 | (radio_refusals != before ? radio_refusal & 0xff : 0));
+        if (r < 0)
             silent++;
         /* A radio processor that hears nothing is not waited for
          * nineteen times over (two seconds each). */
         if (i == 1 && silent == 2)
             return 99;
     }
-    if (radio_source(RADIO_TUNER, 7))
+    before = radio_refusals;
+    r = radio_source(RADIO_TUNER, 7);
+    radio_start_log[12] = (u16)((r < 0 ? 0x8000 : 0) | (radio_refusals - before) << 8 | (radio_refusals != before ? radio_refusal & 0xff : 0));
+    if (r)
         silent++;
-    for (i = 0; i < sizeof later / sizeof later[0]; i++)
-        if (radio_command(later[i][0], later[i] + 2, later[i][1], answer, sizeof answer) < 0)
+    for (i = 0; i < sizeof later / sizeof later[0]; i++) {
+        before = radio_refusals;
+        r = radio_command(later[i][0], later[i] + 2, later[i][1], answer, sizeof answer);
+        radio_start_log[13 + i] = (u16)((r < 0 ? 0x8000 : 0) | (radio_refusals - before) << 8 | (radio_refusals != before ? radio_refusal & 0xff : 0));
+        if (r < 0)
             silent++;
+    }
     return silent;
 }

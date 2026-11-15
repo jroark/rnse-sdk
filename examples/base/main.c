@@ -14,7 +14,8 @@
  * It brings up by itself what the stock software would have: the radio
  * processor (radio_start), the card processors (sd_init, when MEDIA is
  * first pressed).  What each said goes out on the CAN bus (0x7F8, test
- * 0x33): item 0 radio_start's unanswered frames, 1 the source and the
+ * 0x33): item 0 radio_start's unanswered frames, 7 its log of each
+ * frame, 1 the source (with the last refusal and their count) and the
  * answer, 2 the card's slot and sd_init's result with the last card
  * command, 3 a file started, 4 a file's end, 5 a frequency, 6 the
  * volume.
@@ -127,7 +128,7 @@ static void source(int to_media)
         sd_play_stop();
     media = to_media && files;
     r = radio_source(media ? RADIO_DECODER : RADIO_TUNER, volume);
-    rec(1, (u32)media, (u32)r);
+    rec(1, (u32)media << 16 | (u32)(radio_refusal & 0xff) << 8 | (u32)(radio_refusals & 0xff), (u32)r);
     if (media)
         play();
     else
@@ -152,6 +153,8 @@ int main(void)
     cd_command(allow_removal, 0, 0);
     r = radio_start();
     rec(0, (u32)r, (u32)firmware_installed());
+    for (i = 0; i < 19; i++)
+        rec(7, (u32)i, radio_start_log[i]);
     console_puts(r ? "radio: frames unanswered\n" : "radio started\n");
     source(0);
     for (;;) {

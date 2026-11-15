@@ -362,6 +362,21 @@ in the first place).  A program from a card never noticed, the line
 being set already.  The emulator's stand-in took any format; it hears
 only mode 0 now.
 
+With the line right the whole of it works on a unit, installed in
+flash and after a power cut too: the radio is heard within three
+seconds of power, the knobs answer, a card is started from nothing and
+its file played.  What the radio processor does at a start is not what
+the stand-in does, though.  It refuses frames: of the nineteen that
+`radio_start` sends, eight came back with an acknowledgement of 0x07
+(and one, `d0`, of 0x08) and were taken when sent again 100 ms later,
+as the first frame after them was at other starts; the driver took a refusal for
+no answer at first, and the screen said so over a playing radio.
+`radio_command` now sends a refused frame again, for two seconds.  And
+one frame, `8a`, a unit's radio processor says nothing to at all: it is
+sent and not waited for.  What 0x07 and 0x08 mean (busy with the frame
+before, presumably: the frames are sent back to back, which the stock
+software may not do) and what `8a` is for are not known.
+
 ## Building and running
 
 You need an SH-4 GCC that can produce big-endian code without its
