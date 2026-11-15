@@ -1,25 +1,7 @@
-/* Programs from an SD card.  This one goes on a disc, once; what it
- * starts is the file RNSE.BIN in the root directory of a FAT card in
- * either slot: a program built with build.sh, the .bin as it is.  A new
- * program to try is then a file copied to the card, not a disc burned.
- *
- * It looks in the first slot and then in the second, says on the screen
- * what it found, and starts the program in its own place, with the
- * packed stock loader still there for the program's stock_update.  A
- * program that ends in restart() is back here half a minute later,
- * with whatever is on the card by then.
- *
- * Without a card or a file it says so and waits: SETUP hands over to
- * the stock loader (the unit updates itself from the disc and the disc
- * is no update any more), RETURN or a minute restarts the unit, and so
- * comes back here.
- *
- * What it found also goes out on the CAN bus, for a logic analyser
- * (frames 0x7F8, as the suite's: 0x20, the slot, then what sd_init
- * said and what sd_load said; 0x21 with the file's size when it starts
- * one).
- *
- * The 192 with the North American software 0371 only: see src/sd.c. */
+/* Persistent SD test loader for the North American 192 / V222 0371.
+ * RNSE.BIN is a rebuilt SDK image. Completion returns here in RAM;
+ * remove/reinsert the card, or press RETURN, to run another test.
+ * SETUP twice within five seconds starts the carried stock updater. */
 #include "rnse.h"
 
 static int s, row;
@@ -62,70 +44,85 @@ static void number(const char *what, int v)
 int main(void)
 {
     u8 *image = (u8 *)(way_back_scratch + 0x1000);
-    u32 size = 0, start;
-    int slot, r = -1;
+    u32 changed[2] = { 0, 0 }, size, confirm = 0, keys_start, blocked = 0;
+    int raw[2], stable[2] = { 0, 0 }, armed[2] = { 1, 1 };
+    int slot, r, status = 0, returned, setup_down = 0, return_down = 0;
 
+    returned = loader_returned(&status, &blocked);
     board_init();
     console_puts("\nrnse sdk: sdboot\n");
     s = screen_width / 400;
     screen_palette(1, 255, 255, 255);
     screen_palette(2, 255, 96, 0);
     screen_text(8 * s, 6 * s, "PROGRAMS FROM AN SD CARD", 2, 2 * s);
-    /* The faceplate controller is left as the installed software has
-     * it, lighting and all, for the program that comes: started anew
-     * here and then not talked to while the card is read, it would
-     * have no settings and the screen no light (which is what a unit
-     * showed).  It is started below, when its keys are wanted. */
-    can_init();
-    for (slot = 0; slot < 2 && r; slot++) {
-        u32 t = millis();
-        number("SLOT", slot + 1);
-        /* First as the installed software left the card, which costs
-         * nothing; then started anew. */
-        r = sd_attach(slot);
-        record((u8)(4 + slot), (u32)r, millis() - t);
-        if (r == 0) {
-            number("  AS THE STOCK SOFTWARE LEFT IT", 0);
-        } else {
-            t = millis();
-            r = sd_init(slot);
-        }
-        record((u8)slot, (u32)r, millis() - t);
-        record((u8)(8 + slot), (u32)sd_last[0] << 16 | sd_last[1], sd_last[2]);
-        if (r) {
-            number("  NO CARD, OR NOT STARTED:", r);
-            number("    AT COMMAND", sd_last[0] & 0x3f);
-            number("    ANSWER", sd_last[1]);
-            continue;
-        }
-        t = millis();
-        r = sd_load("RNSE    BIN", image, 0x100000, &size);
-        if (r == 0 && size > 0x1c000)
-            r = -3; /* more than the 192's place for a program holds */
-        record((u8)(2 + slot), (u32)r, millis() - t);
-        if (r) {
-            number("  NO RNSE.BIN:", r);
-            number("    AT COMMAND", sd_last[0] & 0x3f);
-            number("    ANSWER", sd_last[1]);
-        }
-    }
-    if (r == 0) {
-        record(0x21, size, 0);
-        number("RNSE.BIN, BYTES:", (int)size);
-        say("STARTING IT", 2);
-        delay_ms(500);
-        r = run_image(image, size);
-        number("NOT A PROGRAM FOR THIS PLACE:", r);
-    }
-    say("SETUP: STOCK UPDATE  RETURN: RESTART", 2);
     panel_init();
-    start = millis();
+    sd_idle = panel_poll;
+    can_init();
+    keys_start = millis();
+    return_down = returned >= 0;
+    if (returned >= 0) {
+        armed[0] = !(blocked & 1);
+        armed[1] = !(blocked & 2);
+        number("TEST RETURNED:", status);
+    }
+    say("WAITING FOR CARD", 1);
+    say("RETURN: RERUN  SETUP TWICE: UPDATE", 2);
+    for (slot = 0; slot < 2; slot++) {
+        raw[slot] = sd_present(slot);
+        changed[slot] = millis();
+    }
     for (;;) {
         panel_poll();
-        if (panel_key(KEY_SETUP) && stock_loader_carried())
-            stock_update();
-        if (panel_key(KEY_RETURN) || millis() - start > 60000)
-            restart();
+        if (panel_key(KEY_SETUP) && !setup_down) {
+            if (confirm && millis() - confirm < 5000 && stock_loader_carried())
+                stock_update();
+            confirm = millis() | 1;
+            row = 5;
+            say("SETUP AGAIN TO UPDATE STOCK FIRMWARE", 2);
+        }
+        setup_down = panel_key(KEY_SETUP);
+        if (panel_key(KEY_RETURN) && !return_down) {
+            armed[0] = armed[1] = 1;
+            confirm = 0;
+        }
+        return_down = panel_key(KEY_RETURN) ||
+            (returned >= 0 && (!panel_online() || millis() - keys_start < 1000));
+        for (slot = 0; slot < 2; slot++) {
+            int present = sd_present(slot);
+            if (raw[slot] != present) {
+                raw[slot] = present;
+                changed[slot] = millis();
+            }
+            if (millis() - changed[slot] < 100)
+                continue;
+            stable[slot] = present;
+            if (!stable[slot]) {
+                armed[slot] = 1;
+                continue;
+            }
+            if (!armed[slot])
+                continue;
+            armed[slot] = 0;
+            row = 3;
+            number("SLOT", slot + 1);
+            r = sd_attach(slot);
+            if (r) r = sd_init(slot);
+            record((u8)slot, (u32)r, 0);
+            if (r == -2) {
+                say("NEEDS V222 0371 INSTALLED SOFTWARE", 2);
+                continue;
+            }
+            if (!r) r = sd_load("RNSE    BIN", image, 0x1c000, &size);
+            record((u8)(2 + slot), (u32)r, 0);
+            if (!r && !sd_present(slot)) r = -20;
+            if (!r) {
+                number("RNSE.BIN, BYTES:", (int)size);
+                say("STARTING IT", 2);
+                r = loader_run(image, size, slot, (!armed[0]) | (!armed[1] << 1));
+            }
+            number("LOAD ERROR:", r);
+            say("REMOVE / REINSERT CARD OR RETURN", 2);
+        }
         cpu_idle();
     }
 }

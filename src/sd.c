@@ -85,9 +85,11 @@ static void pause(void)
 static int wait_low(u8 mask, u32 ms)
 {
     u32 start = millis();
-    while (REG8(STATUS) & mask)
+    while (REG8(STATUS) & mask) {
+        if (sd_idle) sd_idle();
         if (millis() - start > ms)
             return -1;
+    }
     return 0;
 }
 
@@ -120,7 +122,9 @@ static int put(u16 w)
     /* (Generous: the program takes its time over its own start,
      * after the last word of the download.) */
     for (;;) {
-        u8 status = REG8(STATUS);
+        u8 status;
+        if (sd_idle) sd_idle();
+        status = REG8(STATUS);
         if (!(status & none) && inbox_in - inbox_out < 64) {
             u16 got = REG16(port[slot]);
             inbox[inbox_in++ % 64] = got;
@@ -246,6 +250,13 @@ static int download(void)
     return 0;
 }
 
+int sd_present(int which)
+{
+    if (screen_width != 400 || which < 0 || which > 1)
+        return 0;
+    return which ? !!(REG8(0xb2900001) & 1) : !!(REG8(0xb2500001) & 0x40);
+}
+
 int sd_init(int which)
 {
     static const u16 start[] = { 0x1202, 0xd762, 0x0034 };
@@ -261,6 +272,7 @@ int sd_init(int which)
     if (flash_word(0x200000) != 1 || flash_word(0x200004) != 0x3800 || flash_word(0x20380c) != 2 || flash_word(0x203810) != 0x71bc)
         return -2;
     slot = which & 1;
+    inbox_in = inbox_out = 0;
     high_capacity = 0;
     REG32(LATCH) &= ~(4u << slot);
     delay_ms(20);
@@ -463,6 +475,7 @@ int sd_attach(int which)
     if (flash_word(0x200000) != 1 || flash_word(0x200004) != 0x3800 || flash_word(0x20380c) != 2 || flash_word(0x203810) != 0x71bc)
         return -2;
     slot = which & 1;
+    inbox_in = inbox_out = 0;
     high_capacity = 0;
     for (i = 0; i < 600 && get(&w, 20) == 0; i++)
         ;

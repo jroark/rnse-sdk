@@ -247,6 +247,15 @@ void restart(void);
 /* Another program of this kind, from memory, in this one's place: see
  * src/wayback.c.  With sd_load, programs come from an SD card. */
 int run_image(void *image, u32 bytes);
+/* Cooperative SD loader session (192). Returns only outside a session.
+ * main() completion calls this automatically. Reserve 0x8c7c0000..0x8c800000. */
+void loader_return(int status);
+/* Loader-side helpers: blocked is a two-bit mask of consumed insertions.
+ * loader_run returns only on rejection; loader_returned consumes a completed
+ * session and returns its slot, or -1 when this is a fresh launch. */
+int loader_run(void *image, u32 bytes, int slot, u32 blocked);
+int loader_returned(int *status, u32 *blocked);
+int sd_present(int slot);
 /* (way_back_scratch, below, is where there is room for such an image.) */
 /* What the program was started with: the screen language (0..8) and
  * two values the stock loader gets as well. */

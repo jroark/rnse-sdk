@@ -118,9 +118,12 @@ program as `build.sh` makes it.  The stock software starts the loader
 from the disc as it starts any program there; the loader reads the
 file, puts it in its own place and starts it with the arguments it was
 started with, and with the packed stock loader still where `rnse
-custom` put it, so the program's `stock_update` works.  A program that
-ends in `restart()` is back at the loader half a minute later, with
-whatever is on the card by then.
+custom` put it, so the program's `stock_update` works. The loader saves
+its RAM image before starting the test. Returning from `main()` or calling
+`loader_return(status)` restores the loader directly, without restarting
+stock firmware. It waits for card removal and reinsertion; RETURN reruns
+an inserted card. See [the persistent loader instructions](sd-loader.md)
+for the return contract, reserved memory, and build commands.
 
     sdk/build.sh 192 sdboot
     rnse custom disc.iso V222 sdk/out/sdboot-192.bin sdboot.iso --index 0380
@@ -144,7 +147,8 @@ own table.  `run_image` starts an image in the running program's place.
 `sd_read` reads a sector, `sd_load` a file from a FAT12, FAT16 or FAT32
 card.
 
-In the emulator all of it runs, both slots, with the stock software and
+Before direct return was added, the original restart-based path was tested
+in the emulator in both slots, with the stock software and
 a unit's boot ROM at both ends (`tests/disc.rs`,
 `programs_come_from_an_sd_card`).  On a unit (a North American 192
 with software 0371, a 32 MB card formatted FAT16 by macOS, in either
@@ -177,7 +181,7 @@ out by trying whether the card counts in bytes or sectors.  `sdboot`
 tries that first and `sd_init` after it.  In the emulator it reads
 standard and high-capacity cards so, in 40 ms.  On the unit it read
 that 512 MB card: 30 ms for the card, 50 ms for the file, and a round
-of the loop is 56.8 s with it, round after round.  It wants the card
+of that restart-based loop is 56.8 s with it, round after round.  It wants the card
 in its slot before the disc goes in, so that the stock software has
 started it.  Three
 things a unit taught on the way:
