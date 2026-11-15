@@ -74,6 +74,7 @@ void interrupt(void)
             strobe ^= 1;
             REG32(WATCHDOG) = strobe;
         }
+        display_tick();
     } else if (code == 0x880) {
         can_interrupt();
     } else {
@@ -128,6 +129,57 @@ void screen_pixel(int x, int y, u8 colour)
  * none to set.) */
 #define SCIF_FP 0xff926000
 #define PORT_FP 0xff909000
+
+/* The fold-down display (docs/hardware-193.md, "A/D converter and
+ * ports").  The port at 0xff93f000 (direction +4, output +8, input
+ * +0xc): output bits 19 and 18 drive the motor, input bit 20 is low
+ * only when the display is fully open.  Which of the two bits closes is
+ * assumed (19), as in the emulator's model: nothing here has been tried
+ * on a real 193.  The position is input 4 of the converter at
+ * 0xff93c000. */
+#define MOTOR_PORT 0xff93f000
+#define MOTOR_OPEN (1u << 18)
+#define MOTOR_CLOSE (1u << 19)
+#define ADC 0xff93c000
+
+const int display_input = 4;
+
+void display_port_init(void)
+{
+    REG32(MOTOR_PORT + 8) &= ~(MOTOR_OPEN | MOTOR_CLOSE);
+    REG32(MOTOR_PORT + 4) |= MOTOR_OPEN | MOTOR_CLOSE;
+}
+
+void display_motor(int dir)
+{
+    u32 v = REG32(MOTOR_PORT + 8) & ~(MOTOR_OPEN | MOTOR_CLOSE);
+    if (dir < 0)
+        v |= MOTOR_OPEN;
+    else if (dir > 0)
+        v |= MOTOR_CLOSE;
+    REG32(MOTOR_PORT + 8) = v;
+}
+
+int display_open_switch(void)
+{
+    return !(REG32(MOTOR_PORT + 0xc) & (1u << 20));
+}
+
+/* One conversion: channel n converts inputs 0..n, results at +2k. */
+int adc_convert(int input)
+{
+    int n;
+    REG16(ADC + 0x10) = (u16)(0x2000 | input);
+    for (n = 0; n < 20000; n++) {
+        if (REG16(ADC + 0x10) & 0x8000) {
+            int v = REG16(ADC + 2 * input) >> 6;
+            REG16(ADC + 0x10) = 0;
+            return v;
+        }
+    }
+    REG16(ADC + 0x10) = 0;
+    return -1;
+}
 
 void panel_port_init(void)
 {

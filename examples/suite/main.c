@@ -54,6 +54,14 @@
  *   15  the bus: microseconds for 8192 words of the flash through the
  *       cache (0) and past it (1), and of the battery-backed memory (2)
  *   16  the GPS baseband's registers, read (192)
+ *   19  the display, folded down by the SDK's driver unless SETUP is
+ *       pressed within five seconds (255: left out): while it moves,
+ *       every 50 ms the milliseconds since the start and the position
+ *       (item 1), at its end how long the motor ran and the driver's
+ *       state, 1 open, 5 stuck (2), the position and the open switch
+ *       (3).  It stays open for test 17, whose CD EJECT is behind it,
+ *       and is closed after it: items 4, 5, 6 as 1, 2, 3, state 0
+ *       closed
  *   17  a disc change, if CD EJECT is pressed within fifteen seconds
  *       (SETUP leaves it out at once):
  *       the disc comes out and is waited for for a minute; then the
@@ -680,6 +688,65 @@ static void disc_change(void)
     result("64 SECTORS US", t, 0);
 }
 
+static int display_moved;
+
+static void display_run(u8 first, int open_it)
+{
+    u32 t0 = millis(), next = 0;
+    int state;
+    if (open_it)
+        display_open();
+    else
+        display_close();
+    for (;;) {
+        state = display_state();
+        if (state != DISPLAY_OPENING && state != DISPLAY_CLOSING)
+            break;
+        if (millis() - t0 >= next) {
+            rec(19, first, millis() - t0, (u32)display_position());
+            next += 50;
+        }
+        panel_poll();
+        cpu_idle();
+    }
+    rec(19, (u8)(first + 1), display_run_ms(), (u32)state);
+    rec(19, (u8)(first + 2), (u32)display_position(), (u32)display_open_switch());
+    result(open_it ? "MOTOR RAN MS, OPENING" : "MOTOR RAN MS, CLOSING", display_run_ms(), 0);
+    result("STATE (0 CLOSED, 1 OPEN, 5 STUCK)", (u32)state, 0);
+    result("POSITION", (u32)display_position(), 0);
+}
+
+static void display_down(void)
+{
+    u32 start = millis();
+    open(19, "THE DISPLAY FOLDS DOWN.  SETUP: NOT");
+    while (millis() - start < 5000) {
+        prompt("DISPLAY OPENS.  SETUP: NOT", 5 - udiv(millis() - start, 1000));
+        panel_poll();
+        if (panel_key(KEY_SETUP)) {
+            prompt(0, 0);
+            rec(19, 255, 0, 0);
+            show("   LEFT OUT");
+            return;
+        }
+        cpu_idle();
+    }
+    prompt("DISPLAY MOVING: HANDS OFF", 0);
+    display_run(1, 1);
+    prompt(0, 0);
+    display_moved = 1;
+}
+
+static void display_up(void)
+{
+    if (!display_moved)
+        return;
+    show("   THE DISPLAY CLOSES");
+    prompt("DISPLAY MOVING: HANDS OFF", 0);
+    display_run(4, 0);
+    prompt(0, 0);
+}
+
 static void memory_dump(void)
 {
     const u8 *m = (const u8 *)0xb0000000;
@@ -751,7 +818,9 @@ int main(void)
         gps();
     }
     hands();
+    display_down();
     disc_change();
+    display_up();
     if (screen_width == 400)
         memory_dump();
     watchdog();

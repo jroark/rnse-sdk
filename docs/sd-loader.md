@@ -34,9 +34,11 @@ still performs an update and exits the session.
 At the loader, a card already present runs once. Otherwise insert a card;
 slot one wins if both are detected together. After completion or an error,
 remove and reinsert that card to retry, or press RETURN to rerun it. Holding
-a key counts as one press. SETUP, released and pressed again within five
-seconds, deliberately starts the carried stock updater, which writes flash
-and ends the loader session. There is no automatic restart or update.
+a key counts as one press. The key next to the power button opens and
+closes the display (in front of the card slots and the drive) and CD EJECT
+ejects the disc, wherever the loader waits, also while it starts a card.
+There is no key or sequence that reaches the stock updater or writes the
+flash, and no automatic restart or update.
 
 Both insertion and removal are debounced for 100 ms. Invalid/missing files
 and read failures remain on the loader screen. Removal while reading must
