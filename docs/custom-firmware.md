@@ -218,10 +218,26 @@ same).  `sdk/examples/player` is a player made of the two with the
 faceplate's keys and knobs.  In the emulator it plays the test file's
 two tones out of the speaker at the right pitch on the right sides
 and the volume knob moves the amplifier (`tests/disc.rs`,
-`sdk_player_plays_an_mp3`).  On a unit none of it has run: the
-emulator's radio processor is a stand-in that takes the frames, and
-what a real one wants besides (a mute, a power state) is not known.
-Standard cards only.
+`sdk_player_plays_an_mp3`).  Standard cards only.
+
+On a unit (the North American 192, the player from a 32 MB card) it
+does what can be told without a speaker, of which the bench has none:
+the card processor takes the file and plays it through, 6.06 s for the
+test file, and the next after it; NEXT, PREV, SELECT and the select
+knob start files as fast as they are pressed; the radio processor
+acknowledges the source and every volume from 0 to 30.  Whether the
+amplifier then lets the converter through to the speakers is what
+nobody has heard yet: the emulator's radio processor is a stand-in
+that takes the frames, and what a real one wants besides (a mute, a
+power state) is not known.
+
+The first try on the unit failed three seconds into the file, with the
+screen dark for the time: the driver waited to write a word while the
+card processor waited for one of its own to be taken, and with the
+driver stuck nobody answered the faceplate controller, which has the
+light.  The stock driver takes the processor's words in an interrupt.
+The SDK's now takes what is there to read whenever it waits to write
+(`put` in `sdk/src/sd.c`), and that was all it wanted.
 
 `sdk/examples/timing` is a row of measurements made to come from a
 card: the display's vertical syncs, what a sector from each card takes,
