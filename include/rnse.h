@@ -130,6 +130,12 @@ int sd_list(int index, char *name, u32 *size);
  * sd_play_stop ends it.  To hear it the amplifier wants the converter
  * as its source: radio_source(RADIO_DECODER, volume). */
 int sd_play(const char *name);
+/* The last 48 words between the host and the card processor, in a
+ * ring (sd_heard_n counts them all; sd_heard_host is 1 for the
+ * host's): what to send out when sound does not do as it should. */
+extern u16 sd_heard[48];
+extern u8 sd_heard_host[48];
+extern u32 sd_heard_n;
 int sd_play_poll(void);
 void sd_play_stop(void);
 

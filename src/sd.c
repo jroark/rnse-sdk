@@ -83,13 +83,47 @@ static int wait_low(u8 mask, u32 ms)
     return 0;
 }
 
+/* Words the processor said while the host was waiting to say one of
+ * its own.  The stock driver takes the processor's words in an
+ * interrupt; a driver that only listens when it expects an answer and
+ * otherwise waits to write can wait for ever, each side with a word
+ * for the other that is not taken (a unit showed that three seconds
+ * into the first file it played).  So whatever is there to read while
+ * the host waits to write is taken and kept for the next get. */
+static u16 inbox[64];
+static u32 inbox_in, inbox_out;
+
+/* The last words in either direction, for whoever has to say what went
+ * wrong on a unit: 0x8000 set in sd_heard_from for the host's. */
+u16 sd_heard[48];
+u8 sd_heard_host[48];
+u32 sd_heard_n;
+
+static void note(u16 w, int host)
+{
+    sd_heard[sd_heard_n % 48] = w;
+    sd_heard_host[sd_heard_n++ % 48] = (u8)host;
+}
+
 static int put(u16 w)
 {
+    u32 start = millis(), t;
+    u8 full = slot ? 2 : 8, none = slot ? 1 : 4;
     /* (Generous: the program takes its time over its own start,
      * after the last word of the download.) */
-    u32 t;
-    if (wait_low(slot ? 2 : 8, 3000))
-        return -1;
+    for (;;) {
+        u8 status = REG8(STATUS);
+        if (!(status & none) && inbox_in - inbox_out < 64) {
+            u16 got = REG16(port[slot]);
+            inbox[inbox_in++ % 64] = got;
+            note(got, 0);
+            continue;
+        }
+        if (!(status & full))
+            break;
+        if (millis() - start > 3000)
+            return -1;
+    }
     /* Not at once.  The processor's program takes most words in its
      * host interrupt, but the words that follow a message's head it
      * fetches itself with the interrupt masked, and then lets the next
@@ -103,19 +137,23 @@ static int put(u16 w)
     while (micros() - t < 20)
         ;
     REG16(port[slot]) = w;
+    note(w, 1);
     return 0;
 }
 
 static int get(u16 *w, u32 ms)
 {
+    if (inbox_in != inbox_out) {
+        *w = inbox[inbox_out++ % 64];
+        return 0;
+    }
     if (wait_low(slot ? 1 : 4, ms))
         return -1;
     *w = REG16(port[slot]);
+    note(*w, 0);
     return 0;
 }
 
-/* A message's answer: its header and the words it counts (at most
- * `max` are kept).  The header, or -1. */
 static int answer(u16 *out, int max, u32 ms)
 {
     u16 head, w;
@@ -713,7 +751,7 @@ int sd_play_poll(void)
     int i, r;
     if (!playing)
         return 0;
-    while (!(REG8(STATUS) & (slot ? 1 : 4))) {
+    while (inbox_in != inbox_out || !(REG8(STATUS) & (slot ? 1 : 4))) {
         if (get(&head, 100))
             break;
         if (head == 0xc701) {

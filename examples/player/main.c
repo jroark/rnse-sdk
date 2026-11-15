@@ -38,7 +38,7 @@ static void say(const char *text)
 static void rec(u8 item, u32 value, u32 second)
 {
     u8 d[8] = { 0x30, item, (u8)(value >> 24), (u8)(value >> 16), (u8)(value >> 8), (u8)value, (u8)(second >> 8), (u8)second };
-    can_send_for(0x7f8, d, 8, 300);
+    can_send_for(0x7f8, d, 8, 3000);
 }
 
 static int is_mp3(const char *n)
@@ -69,10 +69,29 @@ static void show(void)
     line(screen_height - 20, text, 1);
 }
 
+/* What the card processor and the driver last said to each other, when
+ * something went wrong: items 0x40 on, two words each, the second
+ * value 1 for a word of the host's. */
+static void heard(void)
+{
+    u32 i, n = sd_heard_n < 48 ? sd_heard_n : 48;
+    for (i = 0; i < n; i++) {
+        u32 at = umod(sd_heard_n - n + i, 48);
+        rec((u8)(0x40 + i), sd_heard[at], sd_heard_host[at]);
+    }
+}
+
+static int failures, amplifier;
+
 static void start(void)
 {
     int r = sd_play(names[current]);
     rec(2, (u32)current, (u32)r);
+    rec(1, (u32)amplifier, 0);
+    if (r) {
+        heard();
+        failures++;
+    }
     console_puts(r ? "not played: " : "playing: ");
     console_puts(names[current]);
     console_puts("\n");
@@ -110,6 +129,7 @@ int main(void)
     panel_init();
     if (files) {
         r = radio_source(RADIO_DECODER, volume);
+        amplifier = r;
         rec(1, (u32)r, 0);
         if (r)
             say("THE AMPLIFIER DOES NOT ANSWER");
@@ -148,10 +168,20 @@ int main(void)
         if (files) {
             r = sd_play_poll();
             if (r <= 0) {
-                /* At its end, the next one. */
+                /* At its end, the next one; after an error what was
+                 * said goes out, and after three the player rests. */
                 rec(3, (u32)current, (u32)r);
-                current = (int)umod((u32)(current + 1), (u32)files);
-                start();
+                if (r < 0) {
+                    heard();
+                    failures++;
+                }
+                if (failures >= 3) {
+                    line(screen_height - 40, "THE PLAYER GAVE UP: SEE THE CAN LOG", 2);
+                    files = 0;
+                } else {
+                    current = (int)umod((u32)(current + 1), (u32)files);
+                    start();
+                }
             }
         }
     }
