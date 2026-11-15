@@ -19,6 +19,9 @@
  *   RETURN     done, without an update: the unit starts again as it
  *              is (and, with the disc in the drive, the program after
  *              it: see restart in rnse.h)
+ *   PREV       the drive is told to start (START STOP UNIT with the
+ *              start bit): a 192's drive does not turn a disc that has
+ *              gone in until it is, and says 2/04/04 until then
  *   NEXT       how fast the drive reads: 256 sectors from sector 16
  *              on, sixteen at a time, timed (a line READ and the
  *              milliseconds; on the bus kind 3 with the time in the
@@ -49,6 +52,7 @@ static const u8 test_unit_ready[12] = { 0x00 };
 static const u8 request_sense[12] = { 0x03, 0, 0, 0, 18 };
 static const u8 allow_removal[12] = { 0x1e };
 static const u8 eject[12] = { 0x1b, 1, 0, 0, 2 };
+static const u8 start_unit[12] = { 0x1b, 0, 0, 0, 1 };
 
 /* Sixteen sectors at a time for the reading test. */
 static u8 sectors[16 * 2048];
@@ -89,6 +93,10 @@ static void log_line(u32 ms, int kind, u8 key, u8 code, u8 qualifier)
     *p++ = ' ';
     if (kind == 1) {
         const char *q = "READY";
+        while (*q)
+            *p++ = *q++;
+    } else if (kind == 5) {
+        const char *q = "START";
         while (*q)
             *p++ = *q++;
     } else if (kind == 3 || kind == 4) {
@@ -134,7 +142,7 @@ static void log_line(u32 ms, int kind, u8 key, u8 code, u8 qualifier)
 int main(void)
 {
     u32 start, next = 0, last = 0xffffffff;
-    int was_eject = 0, was_next = 0, again = 0;
+    int was_eject = 0, was_next = 0, was_prev = 0, again = 0;
 
     board_init();
     console_puts("\nrnse sdk: drive\n");
@@ -142,7 +150,7 @@ int main(void)
     screen_palette(1, 255, 255, 255);
     screen_palette(2, 255, 96, 0);
     screen_text(4 * s, 2 * s, "DRIVE LOG  CD EJECT: OUT  SETUP: UPDATE  RETURN: RESTART", 2, s);
-    screen_text(4 * s, 11 * s, "NEXT: READING TEST", 2, s);
+    screen_text(4 * s, 11 * s, "PREV: START THE DISC  NEXT: READING TEST", 2, s);
     panel_init();
     can_init();
     cd_init();
@@ -166,6 +174,12 @@ int main(void)
             log_line(millis() - start, r ? 4 : 3, (u8)(t >> 16), (u8)(t >> 8), (u8)t);
         }
         was_next = panel_key(KEY_NEXT);
+        if (panel_key(KEY_PREV) && !was_prev) {
+            console_puts("start\n");
+            log_line(millis() - start, 5, 0, 0, 0);
+            cd_command(start_unit, 0, 0);
+        }
+        was_prev = panel_key(KEY_PREV);
         if (panel_key(KEY_RETURN))
             again = 1;
 #ifdef RESTART

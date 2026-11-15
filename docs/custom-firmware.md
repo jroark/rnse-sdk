@@ -569,8 +569,16 @@ Things that were wrong in what had been assumed, besides the latch:
    latch left alone the faceplate controller keeps its lighting, and
    `panel_init` after it does no harm.
 
-Not tried on the unit: the knobs, reading sectors from a program,
-receiving on CAN.
+7. **The same with a reading test.**  256 sectors read by the SDK's
+   own loop in 1510 ms.  After an eject and a disc pushed back in,
+   reading failed: the drive does not turn a disc it has loaded until
+   it is told to start, which the stock software does and the SDK did
+   not (`docs/boot-rom.md`).  `cd_wait_ready` sends the command now,
+   as the stock software does, whenever the drive is not ready with a
+   disc in it; that has run in the emulator only.
+
+Not tried on the unit: the knobs, receiving on CAN, the drive's start
+command from a program.
 
 ## What this does and does not establish
 

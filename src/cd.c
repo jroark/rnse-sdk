@@ -76,7 +76,8 @@ int cd_wait_ready(u32 ms)
 {
     static const u8 test_unit_ready[12] = { 0x00 };
     static const u8 request_sense[12] = { 0x03, 0, 0, 0, 18 };
-    u32 start = millis();
+    static const u8 start_unit[12] = { 0x1b, 0, 0, 0, 1 };
+    u32 start = millis(), started = start - 1000;
     for (;;) {
         u8 sense[18];
         int r = cd_command(test_unit_ready, 0, 0);
@@ -84,7 +85,16 @@ int cd_wait_ready(u32 ms)
             return r;
         /* Not ready, or the disc has changed: the drive wants to be
          * asked why before it says anything else. */
-        cd_command(request_sense, sense, sizeof sense);
+        if (cd_command(request_sense, sense, sizeof sense) == 0 && (sense[2] & 15) == 2 && sense[12] == 0x04) {
+            /* Not ready, with a disc: the 192's drive does not turn a
+             * disc it has just loaded until it is told to (on a unit
+             * it said 2/04/04 for as long as it was only asked), and
+             * the stock software tells it whenever it is not ready. */
+            if (millis() - started > 500) {
+                cd_command(start_unit, 0, 0);
+                started = millis();
+            }
+        }
         if (millis() - start > ms)
             return r;
         delay_ms(100);
