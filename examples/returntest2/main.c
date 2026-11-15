@@ -14,7 +14,7 @@ int main(void)
     screen_text(12, 140, "EXPECT RETURN STATUS 23", 1, 2);
     start = millis();
     while (millis() - start < 5000) {
-        panel_poll();
+        panel_service();
         cpu_idle();
     }
     loader_return(23);

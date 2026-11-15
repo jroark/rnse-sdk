@@ -198,6 +198,11 @@ static int session_valid(void)
            SESSION[1] == ~SESSION_MAGIC && SESSION[2] == LOADER_BASE && SESSION[3] < 2;
 }
 
+int loader_active(void)
+{
+    return session_valid() && SESSION[4] == 1;
+}
+
 int loader_returned(int *status, u32 *blocked)
 {
     int slot;
@@ -208,6 +213,35 @@ int loader_returned(int *status, u32 *blocked)
     *blocked = SESSION[10] & 3;
     SESSION[0] = 0;
     return slot;
+}
+
+/* The name of the program a session runs (11 characters, as a
+ * directory names it) and a flag of the loader's, kept with the
+ * session's control data in SESSION[11..15]: the loader is started
+ * afresh after every return and keeps nothing else. */
+void loader_note(const char *name, u32 flags)
+{
+    u32 i, w[3] = { 0, 0, 0 };
+    for (i = 0; i < 11 && name[i]; i++)
+        w[i >> 2] |= (u32)(u8)name[i] << (24 - 8 * (i & 3));
+    SESSION[11] = w[0];
+    SESSION[12] = w[1];
+    SESSION[13] = w[2];
+    SESSION[15] = flags;
+    SESSION[14] = ~(w[0] ^ w[1] ^ w[2] ^ flags);
+}
+
+int loader_noted(char *name, u32 *flags)
+{
+    u32 i, w[3] = { SESSION[11], SESSION[12], SESSION[13] };
+    if (SESSION[14] != ~(w[0] ^ w[1] ^ w[2] ^ SESSION[15]) || !w[0])
+        return 0;
+    for (i = 0; i < 11; i++)
+        name[i] = (char)(w[i >> 2] >> (24 - 8 * (i & 3)));
+    name[11] = 0;
+    if (flags)
+        *flags = SESSION[15];
+    return 1;
 }
 
 int loader_run(void *image, u32 bytes, int slot, u32 blocked)

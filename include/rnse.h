@@ -161,6 +161,21 @@ int cd_follow_key(void);
  * disc and the cards behind the display can always be got at.  Call it
  * in every loop, and set sd_idle and display_idle to it. */
 void panel_service(void);
+/* RETURN, as panel_service follows it.  Held for two seconds, it ends
+ * a program started by the SD loader: loader_leave first, when set (to
+ * stop sound and the like), the display brought to rest, then
+ * loader_return(LOADER_RETURN_HELD).  Outside a loader session (or with
+ * panel_return_to_loader cleared, as the loader itself has it) nothing
+ * happens but that panel_return_held says so, once.  A press let go
+ * within the two seconds is a short one: panel_return_short says so,
+ * once, on its release, so that a long hold never counts as a short
+ * press as well.  A RETURN already down when the program starts counts
+ * only after it has been let go. */
+#define LOADER_RETURN_HELD 99
+extern void (*loader_leave)(void);
+extern int panel_return_to_loader;
+int panel_return_short(void);
+int panel_return_held(void);
 /* Sectors of 2048 bytes. */
 int cd_read(u32 sector, u32 count, void *buf);
 /* A file in the root directory of an ISO 9660 disc, by its name in
@@ -317,12 +332,21 @@ int run_image(void *image, u32 bytes);
 /* Cooperative SD loader session (192). Returns only outside a session.
  * main() completion calls this automatically. Reserve 0x8c7c0000..0x8c800000. */
 void loader_return(int status);
+/* Whether this program runs in a loader session (and so has a loader
+ * to return to). */
+int loader_active(void);
 /* Loader-side helpers: blocked is a two-bit mask of consumed insertions.
  * loader_run returns only on rejection; loader_returned consumes a completed
  * session and returns its slot, or -1 when this is a fresh launch. */
 int loader_run(void *image, u32 bytes, int slot, u32 blocked);
 int loader_returned(int *status, u32 *blocked);
 int sd_present(int slot);
+/* The program a loader session runs, by its directory name (11
+ * characters), and flags of the loader's own, kept across the session
+ * for the loader's next start; loader_noted returns 0 when there is
+ * none (flags may be 0). */
+void loader_note(const char *name, u32 flags);
+int loader_noted(char *name, u32 *flags);
 /* (way_back_scratch, below, is where there is room for such an image.) */
 /* What the program was started with: the screen language (0..8) and
  * two values the stock loader gets as well. */

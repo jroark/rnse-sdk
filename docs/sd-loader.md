@@ -31,6 +31,40 @@ completion retains the SDK's idle loop. `restart()` still resets the unit;
 replace test calls to it when direct return is wanted. `stock_update()`
 still performs an update and exits the session.
 
+## Several programs on one card
+
+Every file `NAME.BIN` in the card's top directory is a program (up to
+nine; names starting with `_`, the Mac's `._` files, are left out).
+With one on the card, it runs when the card goes in, as before.  With
+several, the loader shows a menu: the select knob, NEXT and PREV
+choose, SELECT runs.  When the program returns, the menu comes back
+with it chosen, and RETURN runs it again.  Taking the card out and
+putting it back starts over.  The name of the program run last is
+kept with the session's control data (`loader_note`, `loader_noted`
+in `sdk/src/wayback.c`), since the loader is started afresh after
+every return.
+
+**No new disc is needed for this.**  A loader on the card as `RNSE.BIN`
+is left out of the menu (it is recognised by the banner every version
+prints, `rnse sdk: sdboot`).  A disc with the earlier loader, which
+runs `RNSE.BIN` and nothing else, starts this one from the card; this
+one's first `loader_run` saves *itself* as the loader programs return
+to, so from then on until the unit is switched off it is the resident
+loader, menu and all.  So: the new `sdboot-192.bin` on the card as
+`RNSE.BIN`, the tests under other names:
+
+```sh
+PATH="$PWD/tools/sh4-docker:$PATH" sdk/build.sh 192 sdboot
+cp sdk/out/sdboot-192.bin /Volumes/YOUR_CARD/RNSE.BIN
+PATH="$PWD/tools/sh4-docker:$PATH" sdk/build.sh 192 returntest
+PATH="$PWD/tools/sh4-docker:$PATH" sdk/build.sh 192 returntest2
+cp sdk/out/returntest-192.bin /Volumes/YOUR_CARD/TEST17.BIN
+cp sdk/out/returntest2-192.bin /Volumes/YOUR_CARD/SECOND.BIN
+```
+
+`tests/disc.rs`, `sd_loader_offers_a_menu_of_programs`, checks the menu,
+the return to it, RETURN, and a loader chosen from the menu taking over.
+
 At the loader, a card already present runs once. Otherwise insert a card;
 slot one wins if both are detected together. After completion or an error,
 remove and reinsert that card to retry, or press RETURN to rerun it. Holding

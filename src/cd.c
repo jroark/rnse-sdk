@@ -193,10 +193,62 @@ int cd_follow_key(void)
     return pressed;
 }
 
+/* RETURN: held for two seconds, back to the SD loader (CLAUDE.md,
+ * "Mandatory hardware behavior"); released sooner, a short press for
+ * the program.  A RETURN that is already down when the program starts
+ * (the one that brought it back, say) counts only once it has been let
+ * go. */
+void (*loader_leave)(void);
+int panel_return_to_loader = 1;
+static int return_state; /* 0 not yet seen up, 1 up, 2 down, 3 held */
+static u32 return_since;
+static int return_short, return_held;
+
+static void follow_return(void)
+{
+    if (!panel_key(KEY_RETURN)) {
+        if (return_state == 2)
+            return_short = 1;
+        return_state = 1;
+        return;
+    }
+    if (return_state == 1) {
+        return_state = 2;
+        return_since = millis();
+    } else if (return_state == 2 && millis() - return_since >= 2000) {
+        return_state = 3;
+        if (panel_return_to_loader && loader_active()) {
+            /* The program's own ending (playback stopped and so on),
+             * the display at rest, then the loader; this returns only
+             * when the loader's copy is damaged. */
+            if (loader_leave)
+                loader_leave();
+            display_wait(10000);
+            loader_return(LOADER_RETURN_HELD);
+        }
+        return_held = 1;
+    }
+}
+
+int panel_return_short(void)
+{
+    int r = return_short;
+    return_short = 0;
+    return r;
+}
+
+int panel_return_held(void)
+{
+    int r = return_held;
+    return_held = 0;
+    return r;
+}
+
 /* What every program owes the keys (see rnse.h). */
 void panel_service(void)
 {
     panel_poll();
     display_follow_key();
     cd_follow_key();
+    follow_return();
 }
