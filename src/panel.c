@@ -97,6 +97,25 @@ void panel_init(void)
     panel_port_init();
 }
 
+/* The controller as whoever ran before left it: started and given its
+ * settings (by the boot ROM, the stock software, or a loader that ran
+ * panel_init and panel_poll), so that it keeps the screen lit.  Nothing
+ * is reset; whatever half a frame the port holds is dropped.  Should the
+ * controller announce itself again, it gets its settings as after
+ * panel_init. */
+void panel_attach(void)
+{
+    const u8 *p = panel_settings;
+    while (p[1])
+        p += 2 + p[1];
+    rx_len = 0;
+    started = 1;
+    waiting = 0;
+    attempts = 0;
+    setting = p;
+    busy_time = millis();
+}
+
 void panel_poll(void)
 {
     int c;

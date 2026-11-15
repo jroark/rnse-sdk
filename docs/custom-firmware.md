@@ -212,6 +212,10 @@ things a unit taught on the way:
 What has not run on a unit: a high-capacity card, FAT12 and FAT32 (in the emulator each reads a card
 image formatted by macOS).
 
+A Linux kernel comes from a card the same way: `sdk/examples/linuxboot`
+as `RNSE.BIN` reads `VMLINUX.BIN` from the card and starts it.  See
+[linux.md](linux.md).
+
 ### Sound
 
 `sd_play` has the card processor play an MP3 file of the card: the

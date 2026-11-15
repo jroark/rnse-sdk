@@ -645,6 +645,11 @@ int sd_load(const char *name, void *to, u32 max, u32 *size)
             if (sd_read(data_start + (c - 2) * per_cluster + s, out + done))
                 return -1;
             done += 512;
+            /* A long file is seconds of reading: the faceplate (and
+             * with it the display and the eject key) wants answering
+             * all the while, and a read need not wait for anything. */
+            if (sd_idle)
+                sd_idle();
         }
     }
     return 0;
