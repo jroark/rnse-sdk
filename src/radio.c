@@ -65,6 +65,10 @@ static int frame(u8 *data, int max, int *n, u32 ms)
     return cmd;
 }
 
+/* The command number of the last answer: the command's own, or 0x20
+ * for an acknowledgement. */
+int radio_answered;
+
 int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max)
 {
     int try, i, got, len = 0;
@@ -94,6 +98,7 @@ int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max)
         while (millis() - start < 600) {
             got = frame(answer, max, &len, 600 - (millis() - start));
             if (got == cmd || (got == 0x20 && cmd != 0x20)) {
+                radio_answered = got;
                 REG16(UART1 + 0x04) = control;
                 return got == 0x20 && len && answer[0] ? -2 : len;
             }
@@ -113,4 +118,23 @@ int radio_volume(int volume)
 {
     u8 d[2] = { 0x01, (u8)volume }, a[4];
     return radio_command(0x19, d, 2, a, sizeof a) < 0 ? -1 : 0;
+}
+
+/* The tuner, as the stock software asks for a frequency: in steps of
+ * 50 kHz on FM (2042 is 102.1 MHz).  Seen from the stock software in
+ * the emulator, whose stand-in for the radio processor does not answer
+ * it as the real one must (the software repeats it five times there);
+ * what a real one answers is for a unit to say. */
+int radio_tune(int frequency)
+{
+    u8 d[4] = { 0x03, 0x02, (u8)(frequency >> 8), (u8)frequency }, a[8];
+    return radio_command(0x82, d, 4, a, sizeof a) < 0 ? -1 : 0;
+}
+
+/* The radio processor's status: 57 bytes, of which bytes 4 and 5 are
+ * the tuned frequency and 33 and 34 the amplifier's source and volume.
+ * The number of bytes, or negative. */
+int radio_status(u8 *status, int max)
+{
+    return radio_command(0x88, 0, 0, status, max);
 }

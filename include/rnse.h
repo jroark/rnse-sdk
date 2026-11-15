@@ -149,6 +149,13 @@ int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max);
 /* The amplifier's source and its volume, 0 to 30; the volume alone. */
 int radio_source(int source, int volume);
 int radio_volume(int volume);
+/* The answer's command number after radio_command (0x20: acknowledged). */
+extern int radio_answered;
+/* The tuner to a frequency, in steps of 50 kHz on FM (2042: 102.1 MHz);
+ * the radio processor's status block (57 bytes: 4 and 5 the frequency,
+ * 33 the source, 34 the volume). */
+int radio_tune(int frequency);
+int radio_status(u8 *status, int max);
 int sd_read(u32 sector, void *buf);
 int sd_load(const char *name, void *to, u32 max, u32 *size);
 
