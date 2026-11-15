@@ -285,8 +285,13 @@ void loader_return(int status)
     u32 i, sum = 0;
     if (!session_valid() || SESSION[4] != 1)
         return;
-    for (i = 0; i < LOADER_SIZE / 4; i++)
+    /* (The watchdog strobed meanwhile: a caller may have had interrupts
+     * off for a while already, Linux's way back for one.) */
+    for (i = 0; i < LOADER_SIZE / 4; i++) {
         sum += ((volatile u32 *)SNAPSHOT)[i];
+        if (!(i & 1023))
+            REG8(0xb2300001) ^= 1;
+    }
     if (sum != SESSION[6])
         return; /* corrupted backup: never execute it */
     display_halt();
