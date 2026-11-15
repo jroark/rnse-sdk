@@ -94,8 +94,11 @@ int main(void)
         if (r == 0 && size > 0x1c000)
             r = -3; /* more than the 192's place for a program holds */
         record((u8)(2 + slot), (u32)r, millis() - t);
-        if (r)
+        if (r) {
             number("  NO RNSE.BIN:", r);
+            number("    AT COMMAND", sd_last[0] & 0x3f);
+            number("    ANSWER", sd_last[1]);
+        }
     }
     if (r == 0) {
         record(0x21, size, 0);

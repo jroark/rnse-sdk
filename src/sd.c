@@ -87,8 +87,21 @@ static int put(u16 w)
 {
     /* (Generous: the program takes its time over its own start,
      * after the last word of the download.) */
+    u32 t;
     if (wait_low(slot ? 2 : 8, 3000))
         return -1;
+    /* Not at once.  The processor's program takes most words in its
+     * host interrupt, but the words that follow a message's head it
+     * fetches itself with the interrupt masked, and then lets the next
+     * interrupt pass as the one that belonged to the fetched word
+     * (its routine at 0x0381, flag 0x0a61).  A word that arrives
+     * between the fetch and the unmasking, eight instructions, has no
+     * interrupt of its own then and is never taken: the processor
+     * waits and so does the host.  So the program gets the time to be
+     * past that before the next word. */
+    t = micros();
+    while (micros() - t < 20)
+        ;
     REG16(port[slot]) = w;
     return 0;
 }
