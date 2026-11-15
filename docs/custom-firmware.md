@@ -284,9 +284,24 @@ drive:
   example), is the way out of a program that runs and cannot be
   operated.
 
+**The disc that installed the program must not be what the ROM
+installs from.**  A disc has its loader twice: in the container, where
+the installed software takes it from for an update, and as a file
+(`LDM.BIN`), which is the one the boot ROM runs when the unit has no
+software (tried with each replaced alone: each runs its own).  If both
+were the stock loader, a unit whose program was taken out with that
+disc still in the drive would get the program back at once, and a
+program that does not work would never let the disc go, since nothing
+but the program could push it out.  So `rnse firmware --swap swap.bin`
+puts a program of the SDK in the file's place and leaves the stock
+loader in the container: `sdk/examples/swap` pushes the disc out, says
+what to put in, and restarts the unit when a disc has gone in and is
+ready.  Always make a firmware disc with it.
+
 In the emulator, under a unit's boot ROM and with arbitrary RAM and the
 caches modelled, all of it runs (`tests/disc.rs`,
-`a_program_is_installed_in_flash_and_taken_out_again` and
+`a_program_is_installed_in_flash_and_taken_out_again`,
+`a_firmware_disc_left_in_the_drive_does_not_install_again` and
 `a_program_in_flash_that_never_gets_going_takes_itself_out`): the
 install through the stock software and its loader, the program from
 flash with its picture and the faceplate answering, the way out by the
