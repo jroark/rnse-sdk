@@ -261,9 +261,12 @@ on the boot ROM, which starts whatever is there with a right checksum
 the loader's place in RAM, where every program of the SDK runs, and
 jump to it.  No disc, no card, at every start.  The 192 only.
 
-The stock software is gone then, except for the modules the program
-does not replace (the card processors' program is in one of them,
-which is where `sd_init` finds it).  Three ways lead back, and all
+The stock software is gone then, except for what the program does not
+replace: the other modules, and the operating system's module from its
+second megabyte on.  The card processors' program is in that part (at
+0x200000 of the flash), which is where `sd_init` finds it; the first
+firmware module that was made had zeroes there, and in the emulator a
+program from flash then found no card.  Three ways lead back, and all
 three end in the boot ROM installing the update disc that is in the
 drive:
 
@@ -325,9 +328,10 @@ been walked once, with `sdk/examples/installed`:
   update.  So a real boot ROM does install from a disc by itself,
   which every way back rests on, and it waits for the disc.
 
-What has still not happened on a unit: a start of the program after
-the power was off (the ROM starts it from reset in the emulator, and
-did after the loader's reset on the unit), the guard's count running
+Installed a second time, the program also started after the power had
+been cut: the unit comes up into it by itself.
+
+What has still not happened on a unit: the guard's count running
 to five, and the swap loader, since the disc was out when the program
 went.  And a program from flash has not yet used the radio processor's
 amplifier or the card processors, which it finds as the boot ROM
@@ -335,6 +339,19 @@ leaves them and not as the stock software does.
 
 This is still the one part of the SDK that can leave a unit without
 software: keep a stock update disc with the unit.
+
+`sdk/examples/base` is a firmware of that kind with something to do: a
+radio and an MP3 player, with the way out.  It brings up what the stock
+software would have, since from flash nothing has: `radio_start` sets
+the line to the radio processor and sends the frames the stock software
+sends at every start, in its order, and `sd_init` starts a card from
+nothing when MEDIA is first pressed (with `sd_idle` set to
+`panel_poll`, so that the faceplate controller is answered through the
+seconds that takes).  In the emulator, started by a unit's boot ROM, it
+tunes, plays a file from a card and goes back
+(`a_firmware_from_flash_is_a_radio_and_a_player`); whether a real radio
+processor and a real card take the same from that state is for a unit
+to say.
 
 ## Building and running
 

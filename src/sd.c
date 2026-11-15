@@ -69,9 +69,17 @@ u16 sd_last[4];
 
 /* The stock driver leaves 150 ms between any two steps of a card's
  * start, and a real card wants the time. */
+void (*sd_idle)(void);
+
 static void pause(void)
 {
-    delay_ms(150);
+    u32 start = millis();
+    /* (A card's start is four seconds of these, and the faceplate
+     * controller, which has the screen's light, wants answering in
+     * the meantime: whoever has one sets sd_idle to panel_poll.) */
+    while (millis() - start < 150)
+        if (sd_idle)
+            sd_idle();
 }
 
 static int wait_low(u8 mask, u32 ms)

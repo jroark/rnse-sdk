@@ -112,6 +112,9 @@ int cd_find(const char *name, u32 *sector, u32 *size);
  * and must have it for whole sectors: 0, -1 a read failed, -2 no such
  * file, -3 too long. */
 int sd_init(int slot);
+/* Called over and over while sd_init waits (it takes seconds): set it
+ * to panel_poll in a program that talks to the faceplate. */
+extern void (*sd_idle)(void);
 /* The card as the installed software has started it, with nothing
  * reset: 0, or negative when no sector can be read that way. */
 int sd_attach(int slot);
@@ -170,6 +173,11 @@ extern int radio_answered;
 /* The tuner to a frequency, in steps of 50 kHz on FM (2042: 102.1 MHz);
  * the radio processor's status block (57 bytes: 4 and 5 the frequency,
  * 33 the source, 34 the volume). */
+/* For a program started by the boot ROM (from flash): the line to the
+ * radio processor set up and the frames the stock software sends it
+ * at every start, the tuner as the source at the end.  The number of
+ * frames that went unanswered. */
+int radio_start(void);
 int radio_tune(int frequency);
 int radio_status(u8 *status, int max);
 int sd_read(u32 sector, void *buf);

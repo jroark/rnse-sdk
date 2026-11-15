@@ -138,3 +138,45 @@ int radio_status(u8 *status, int max)
 {
     return radio_command(0x88, 0, 0, status, max);
 }
+
+/* The radio processor's line and its start, for a program that the
+ * boot ROM starts (from flash) and that finds neither as the installed
+ * software leaves them.  The line as that software has it: 9600 bit/s,
+ * eight bits and even parity, like the faceplate's.  And then the
+ * frames that software sends at every start, in its order: what each
+ * of them is for is known of few (0x0b asks for the version, 0x88 for
+ * the status, 0x19 [01 n] would be the volume), so they are sent as
+ * they are.  Harmless after the installed software has done the same.
+ * Returns how many of them went unanswered. */
+int radio_start(void)
+{
+    static const u8 frames[][5] = {
+        /* command, length, data */
+        { 0x80, 2, 0x00, 0x02 }, { 0xdd, 0 }, { 0x0b, 0 }, { 0xd1, 0 }, { 0x88, 0 }, { 0x8a, 0 },
+        { 0x80, 2, 0x02, 0x01 }, { 0x17, 1, 0x01 }, { 0x19, 3, 0x07, 0x03, 0x0a }, { 0xd1, 0 },
+        { 0x19, 3, 0x07, 0x00, 0x17 }, { 0xd9, 0 },
+    };
+    static const u8 later[][5] = {
+        { 0x81, 2, 0x0a, 0x0d }, { 0xd0, 0 }, { 0x81, 1, 0x06 }, { 0xde, 1, 0x01 }, { 0x80, 2, 0x08, 0x00 }, { 0x81, 2, 0x0a, 0x02 },
+    };
+    u8 answer[64];
+    u32 i;
+    int silent = 0;
+    if (screen_width != 400)
+        return -1;
+    REG16(UART1 + 0x04) = 0;
+    REG16(UART1 + 0x08) = REG16(UART1 + 0x08) & 0xffc7;
+    REG16(UART1 + 0x00) = 0x0011;
+    REG16(UART1 + 0x02) = 0x005f;
+    REG16(UART1 + 0x0c) = 0x8080;
+    REG16(UART1 + 0x04) = 0x0010; /* the receiver; the transmitter for each frame */
+    for (i = 0; i < sizeof frames / sizeof frames[0]; i++)
+        if (radio_command(frames[i][0], frames[i] + 2, frames[i][1], answer, sizeof answer) < 0)
+            silent++;
+    if (radio_source(RADIO_TUNER, 7))
+        silent++;
+    for (i = 0; i < sizeof later / sizeof later[0]; i++)
+        if (radio_command(later[i][0], later[i] + 2, later[i][1], answer, sizeof answer) < 0)
+            silent++;
+    return silent;
+}
