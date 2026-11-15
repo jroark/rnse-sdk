@@ -75,6 +75,10 @@ _start:
         mov.l   9f, r0
         jsr     @r0
          nop
+        mov     r0, r4
+        mov.l   14f, r0
+        jsr     @r0
+         nop
 10:     bra     10b
          nop
         .align  2
@@ -88,6 +92,7 @@ _start:
 11:     .long   start_args
 12:     .long   start_state
 13:     .long   firmware_guard
+14:     .long   loader_return
 
 ! Allow interrupts of every level (called by board_init at its end).
         .global irq_enable

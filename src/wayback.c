@@ -161,8 +161,8 @@ int run_image(void *image, u32 bytes)
 
     if (bytes < 0x20 || (words[0] & 0xfff00000) != ((u32)_load & 0xfff00000))
         return -1; /* its entry point is not in the loader's place */
-    words[5] = way_back_offset[0];
-    words[6] = way_back_offset[1];
+    words[6] = way_back_offset[0];
+    words[7] = way_back_offset[1];
     irq_disable();
     n = (u32)(way_back_stub_end - way_back_stub);
     for (i = 0; i < n; i++)
@@ -180,4 +180,95 @@ int run_image(void *image, u32 bytes)
     params[10] = way_back_marker ? (u32)(REG8(way_back_marker) | 0x0c) : 0;
     ((void (*)(u32, u32, u32, u32))(u32)stub)((u32)image, UNCACHED(_load) + 0x80, (bytes + 3) >> 2, (u32)params);
     return -3; /* not reached */
+}
+
+/* The upper 256 KiB of way_back_scratch is owned by a cooperative
+ * session, even while a payload runs. All control data is uncached. */
+#define SESSION ((volatile u32 *)0xac7c0000)
+#define SNAPSHOT 0xac7e0000u
+#define SESSION_MAGIC 0x53444c31u
+#define LOADER_BASE 0x8df00000u
+#define LOADER_SIZE 0x20000u
+
+static int session_valid(void)
+{
+    return (u32)_load == LOADER_BASE && SESSION[0] == SESSION_MAGIC &&
+           SESSION[1] == ~SESSION_MAGIC && SESSION[2] == LOADER_BASE && SESSION[3] < 2;
+}
+
+int loader_returned(int *status, u32 *blocked)
+{
+    int slot;
+    if (!session_valid() || SESSION[4] != 2)
+        return -1;
+    slot = (int)SESSION[3];
+    *status = (int)SESSION[5];
+    *blocked = SESSION[10] & 3;
+    SESSION[0] = 0;
+    return slot;
+}
+
+int loader_run(void *image, u32 bytes, int slot, u32 blocked)
+{
+    const u32 *w = image;
+    u32 i, sum = 0;
+    volatile u32 *save = (volatile u32 *)SNAPSHOT;
+    if ((u32)_load != LOADER_BASE || slot < 0 || slot > 1 || bytes < 32 ||
+        bytes > 0x1c000 || w[4] != 0x524e5345 || w[5] != LOADER_SIZE)
+        return -1;
+    for (i = 0; i < 3; i++)
+        if ((w[i] & 1) || w[i] < LOADER_BASE + 0xa0 || w[i] >= LOADER_BASE + 0x80 + bytes)
+            return -2;
+    irq_disable();
+    for (i = 0; i < LOADER_SIZE; i += 32) {
+        u32 a = LOADER_BASE + i;
+        __asm__ volatile ("ocbp @%0" : : "r"(a) : "memory");
+    }
+    for (i = 0; i < LOADER_SIZE / 4; i++) {
+        u32 v = ((volatile u32 *)UNCACHED(LOADER_BASE))[i];
+        save[i] = v;
+        sum += v;
+        if (!(i & 1023)) REG8(0xb2300001) ^= 1;
+    }
+    SESSION[0] = SESSION_MAGIC;
+    SESSION[1] = ~SESSION_MAGIC;
+    SESSION[2] = LOADER_BASE;
+    SESSION[3] = (u32)slot;
+    SESSION[4] = 1;
+    SESSION[6] = sum;
+    SESSION[10] = blocked & 3;
+    for (i = 0; i < 3; i++) SESSION[7 + i] = start_args[i];
+    return run_image(image, bytes);
+}
+
+void loader_return(int status)
+{
+    volatile u32 *stub = (volatile u32 *)0xac7c1000;
+    volatile u32 *params = (volatile u32 *)0xac7c1800;
+    u32 i, sum = 0;
+    if (!session_valid() || SESSION[4] != 1)
+        return;
+    for (i = 0; i < LOADER_SIZE / 4; i++)
+        sum += ((volatile u32 *)SNAPSHOT)[i];
+    if (sum != SESSION[6])
+        return; /* corrupted backup: never execute it */
+    irq_disable();
+    /* Stop timers and every DMA channel before restoring live code. */
+    REG8(0xffd80004) = 0;
+    for (i = 0; i < 8; i++)
+        REG32(0xffa0000c + (i < 4 ? i : i + 1) * 0x10) = 0;
+    SESSION[4] = 2;
+    SESSION[5] = (u32)status;
+    for (i = 0; i < (u32)(way_back_stub_end - way_back_stub); i++)
+        stub[i] = way_back_stub[i];
+    params[0] = LOADER_BASE;
+    params[1] = LOADER_SIZE / 32;
+    params[2] = ((volatile u32 *)SNAPSHOT)[0x80 / 4];
+    params[3] = params[2];
+    for (i = 0; i < 3; i++) params[4 + i] = SESSION[7 + i];
+    params[7] = 0xac7dfff0;
+    params[8] = way_back_strobe;
+    params[9] = 0;
+    params[10] = 0;
+    ((void (*)(u32, u32, u32, u32))(u32)stub)(SNAPSHOT, UNCACHED(LOADER_BASE), LOADER_SIZE / 4, (u32)params);
 }
