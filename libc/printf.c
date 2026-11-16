@@ -1,4 +1,4 @@
-/* Formatted output and input for Doom on the RNS-E: integers, strings,
+/* Formatted output and input for the kit's C library (Doom, Quake, ...): integers, strings,
  * characters and pointers, with flags, width and precision; floating
  * point (%f, %g, %e as %f) only where the program is built with the FPU
  * (Quake, quake/build.sh), so Doom's build is as it was.  scanf knows what the settings file and m_misc.c want: %d %i
