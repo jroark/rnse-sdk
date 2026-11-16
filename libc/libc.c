@@ -1,4 +1,4 @@
-/* The C library of Doom on the RNS-E: strings, numbers, memory, files.
+/* The C library of bare-metal programs on the RNS-E (Doom, umac): strings, numbers, memory, files.
  * (memset and memcpy are the SDK's, sdk/src/common.c; formatted output
  * and input are in printf.c.) */
 #include <ctype.h>
@@ -11,7 +11,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "rnse.h"
-#include "port.h"
+#include "rnse_libc.h"
 
 int errno;
 
@@ -462,7 +462,7 @@ FILE *stdin = &streams[0], *stdout = &streams[1], *stderr = &streams[2];
 char error_text[1024];
 static int error_len;
 
-/* The WAD: put in place by main.c before anything opens it. */
+/* A file in RAM (Doom's WAD), put in place before anything opens it. */
 void files_add_fixed(const char *name, void *data, long size)
 {
     int i;

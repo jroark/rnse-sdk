@@ -127,15 +127,10 @@ static char *hex8(char *p, u32 v)
     return p;
 }
 
-/* The way_back_strobe of the hardware layer: the watchdog's (0: none to
- * serve by hand, the 193's). */
-extern const u32 way_back_strobe;
-
 void unexpected(u32 expevt, u32 intevt, u32 spc)
 {
     char text[40], *p;
     const char *k;
-    u32 n, spins;
     console_puts("\nunexpected exception: EXPEVT=");
     console_hex(expevt);
     console_puts(" INTEVT=");
@@ -144,11 +139,13 @@ void unexpected(u32 expevt, u32 intevt, u32 spc)
     console_hex(spc);
     console_puts("\n");
     /* On the screen as well, since a unit has nothing on its debug port:
-     * what happened and where.  An exception comes here with interrupts
-     * blocked, so the tick no longer serves the watchdog and the unit is
-     * reset 105 ms after it; on the 192 it is served from here for half
-     * a minute (3000 underflows of the tick's timer, which still runs),
-     * so that the screen can be read, and then left to reset the unit. */
+     * what happened and where.  Only for as long as the unit stays up:
+     * the caller then waits with interrupts blocked, nothing serves the
+     * watchdog, and the unit resets into its own software, which can
+     * open the display and eject the disc.  Serving the watchdog from
+     * here to keep the screen up would leave eject and the display key
+     * dead for as long as it does (CLAUDE.md, "Mandatory hardware
+     * behavior"). */
     screen_palette(0, 0, 0, 0);
     screen_palette(1, 255, 255, 255);
     screen_fill(0, 0, screen_width, 44, 0);
@@ -162,16 +159,6 @@ void unexpected(u32 expevt, u32 intevt, u32 spc)
     p = hex8(p, spc);
     *p = 0;
     screen_text(4, 26, text, 1, 2);
-    if (!way_back_strobe)
-        return;
-    for (n = 0; n < 3000; n++) {
-        /* TCR0's underflow flag, every 10 ms; given up on after a while
-         * should the timer not run (an exception before board_init). */
-        for (spins = 0; !(REG16(0xffd80010) & 0x0100) && spins < 2000000; spins++)
-            ;
-        REG16(0xffd80010) &= (u16)~0x0100;
-        REG8(way_back_strobe) ^= 1;
-    }
 }
 
 void screen_fill(int x, int y, int w, int h, u8 colour)
@@ -248,7 +235,7 @@ static const struct {
     { '=', G(00000, 00000, 11111, 00000, 11111, 00000, 00000) },
 };
 
-static const u8 *glyph(char c)
+const u8 *font_glyph(char c)
 {
     unsigned i;
     if (c >= 'a' && c <= 'z')
@@ -266,7 +253,7 @@ static const u8 *glyph(char c)
 void screen_text(int x, int y, const char *s, u8 colour, int scale)
 {
     for (; *s; s++, x += 6 * scale) {
-        const u8 *g = glyph(*s);
+        const u8 *g = font_glyph(*s);
         int row, col;
         if (!g)
             continue;
