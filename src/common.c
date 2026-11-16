@@ -194,7 +194,7 @@ static const struct {
     { '=', G(00000, 00000, 11111, 00000, 11111, 00000, 00000) },
 };
 
-static const u8 *glyph(char c)
+const u8 *font_glyph(char c)
 {
     unsigned i;
     if (c >= 'a' && c <= 'z')
@@ -212,7 +212,7 @@ static const u8 *glyph(char c)
 void screen_text(int x, int y, const char *s, u8 colour, int scale)
 {
     for (; *s; s++, x += 6 * scale) {
-        const u8 *g = glyph(*s);
+        const u8 *g = font_glyph(*s);
         int row, col;
         if (!g)
             continue;

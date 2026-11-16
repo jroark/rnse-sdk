@@ -51,6 +51,9 @@ void screen_fill(int x, int y, int w, int h, u8 colour);
 /* Text in a 5x7 font, each dot `scale` pixels square.  Upper case,
  * digits and a little punctuation. */
 void screen_text(int x, int y, const char *s, u8 colour, int scale);
+/* The font itself: seven rows of a character, bit 4 the left column;
+ * 0 for a character it does not have.  Lower case is upper case. */
+const u8 *font_glyph(char c);
 
 /* The faceplate: keys and the two knobs sit behind a controller of
  * their own on a serial line.  panel_init releases the controller from
@@ -400,6 +403,9 @@ int pcm_put(const s16 *lr, u32 frames);
  * that keep keys answered while playing feed by DMA. */
 extern void (*pcm_idle)(void);
 int pcm_dma(const s16 *lr, u32 frames);
+/* (Samples through P2, uncached, need no writing back, and pcm_dma
+ * does not spend time on it: the way to feed one long transfer that
+ * is written ahead of as it plays.) */
 int pcm_dma_busy(void);
 /* The words a transfer still has to go (two a stereo sample): what a
  * program that streams in blocks looks at before it does anything long,

@@ -35,9 +35,21 @@ for lib in $libs; do
 done
 [ -n "$libs" ] && cflags="$cflags -Ithird_party/libc"
 objs=""
+# An example's file `flags` may give one of its sources other code
+# generation, a line each: the file's name and the options that take
+# the place of -m4-nofpu -Os (-m4 for code that uses the
+# FPU, which the kit's own code leaves alone; -O2 for speed).
 for src in src/crt0.S src/common.c src/heap.c src/libgcc.S src/cache.S src/panel.c src/display.c src/cd.c src/can.c src/sd.c src/pcm.c src/radio.c src/flash.c src/wayback.c src/hw$unit.c examples/$example/*.c; do
     obj=$objdir/$(basename "$src" | sed 's/\.[cS]$/.o/')
-    ${CROSS}gcc $cflags -c -o "$obj" "$src"
+    own=""
+    case $src in
+        examples/*) [ -f examples/$example/flags ] && own=$(awk -v f="$(basename "$src")" '$1 == f { $1 = ""; print }' examples/$example/flags) ;;
+    esac
+    if [ -n "$own" ]; then
+        ${CROSS}gcc $(echo "$cflags" | sed 's/-m4-nofpu -Os//') $own -c -o "$obj" "$src"
+    else
+        ${CROSS}gcc $cflags -c -o "$obj" "$src"
+    fi
     objs="$objs $obj"
 done
 # Code from elsewhere that an example names in its file `libs`, one
