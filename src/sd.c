@@ -688,7 +688,10 @@ int sd_open(const char *name, struct sd_file *f, u32 *chain, u32 max)
     f->size = size;
     f->per_cluster = per_cluster;
     f->data_start = data_start;
-    f->clusters = udiv(size + bytes - 1, bytes);
+    /* (Not size + bytes - 1: that overflows for a file near 4 GiB.) */
+    f->clusters = udiv(size, bytes);
+    if (size - f->clusters * bytes)
+        f->clusters++;
     f->chain = chain;
     if (!chain)
         return 0;
