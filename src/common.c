@@ -119,8 +119,23 @@ void delay_ms(u32 ms)
         cpu_idle();
 }
 
+static char *hex8(char *p, u32 v)
+{
+    int i;
+    for (i = 28; i >= 0; i -= 4)
+        *p++ = "0123456789ABCDEF"[(v >> i) & 15];
+    return p;
+}
+
+/* The way_back_strobe of the hardware layer: the watchdog's (0: none to
+ * serve by hand, the 193's). */
+extern const u32 way_back_strobe;
+
 void unexpected(u32 expevt, u32 intevt, u32 spc)
 {
+    char text[40], *p;
+    const char *k;
+    u32 n, spins;
     console_puts("\nunexpected exception: EXPEVT=");
     console_hex(expevt);
     console_puts(" INTEVT=");
@@ -128,6 +143,35 @@ void unexpected(u32 expevt, u32 intevt, u32 spc)
     console_puts(" SPC=");
     console_hex(spc);
     console_puts("\n");
+    /* On the screen as well, since a unit has nothing on its debug port:
+     * what happened and where.  An exception comes here with interrupts
+     * blocked, so the tick no longer serves the watchdog and the unit is
+     * reset 105 ms after it; on the 192 it is served from here for half
+     * a minute (3000 underflows of the tick's timer, which still runs),
+     * so that the screen can be read, and then left to reset the unit. */
+    screen_palette(0, 0, 0, 0);
+    screen_palette(1, 255, 255, 255);
+    screen_fill(0, 0, screen_width, 44, 0);
+    screen_text(4, 4, "UNEXPECTED EXCEPTION", 1, 2);
+    p = text;
+    for (k = "EXPEVT "; *k; k++)
+        *p++ = *k;
+    p = hex8(p, expevt);
+    for (k = " PC "; *k; k++)
+        *p++ = *k;
+    p = hex8(p, spc);
+    *p = 0;
+    screen_text(4, 26, text, 1, 2);
+    if (!way_back_strobe)
+        return;
+    for (n = 0; n < 3000; n++) {
+        /* TCR0's underflow flag, every 10 ms; given up on after a while
+         * should the timer not run (an exception before board_init). */
+        for (spins = 0; !(REG16(0xffd80010) & 0x0100) && spins < 2000000; spins++)
+            ;
+        REG16(0xffd80010) &= (u16)~0x0100;
+        REG8(way_back_strobe) ^= 1;
+    }
 }
 
 void screen_fill(int x, int y, int w, int h, u8 colour)
@@ -136,6 +180,16 @@ void screen_fill(int x, int y, int w, int h, u8 colour)
     for (j = 0; j < h; j++)
         for (i = 0; i < w; i++)
             screen_pixel(x + i, y + j, colour);
+}
+
+/* A picture of w x h pixels, a row every `pitch` bytes, at (x, y), a
+ * pixel at a time (the 192's hardware layer has a faster one). */
+__attribute__((weak)) void screen_blit(int x, int y, int w, int h, const u8 *pixels, int pitch)
+{
+    int i, j;
+    for (j = 0; j < h; j++)
+        for (i = 0; i < w; i++)
+            screen_pixel(x + i, y + j, pixels[j * pitch + i]);
 }
 
 /* 5x7 font: seven rows a glyph, bit 4 the left column. */

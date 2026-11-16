@@ -35,7 +35,7 @@ for lib in $libs; do
 done
 [ -n "$libs" ] && cflags="$cflags -Ithird_party/libc"
 objs=""
-for src in src/crt0.S src/common.c src/heap.c src/libgcc.S src/cache.S src/panel.c src/display.c src/cd.c src/can.c src/sd.c src/pcm.c src/radio.c src/flash.c src/wayback.c src/hw$unit.c examples/$example/*.c; do
+for src in src/crt0.S src/common.c src/heap.c src/libgcc.S src/cache.S src/panel.c src/display.c src/cd.c src/can.c src/sd.c src/pcm.c src/radio.c src/flash.c src/wayback.c src/enter.c src/hw$unit.c examples/$example/*.c; do
     obj=$objdir/$(basename "$src" | sed 's/\.[cS]$/.o/')
     ${CROSS}gcc $cflags -c -o "$obj" "$src"
     objs="$objs $obj"
