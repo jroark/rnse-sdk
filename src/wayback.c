@@ -192,9 +192,16 @@ int run_image(void *image, u32 bytes)
 #define LOADER_BASE 0x8df00000u
 #define LOADER_SIZE 0x20000u
 
+/* A larger second-stage runtime can join its launcher's existing session.
+ * Its build must explicitly name its own link address. The restored image,
+ * control block, and checksum still belong to the standard SD loader. */
+#ifndef SDK_SESSION_LOAD
+#define SDK_SESSION_LOAD LOADER_BASE
+#endif
+
 static int session_valid(void)
 {
-    return (u32)_load == LOADER_BASE && SESSION[0] == SESSION_MAGIC &&
+    return (u32)_load == SDK_SESSION_LOAD && SESSION[0] == SESSION_MAGIC &&
            SESSION[1] == ~SESSION_MAGIC && SESSION[2] == LOADER_BASE && SESSION[3] < 2;
 }
 
