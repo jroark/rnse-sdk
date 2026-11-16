@@ -285,6 +285,16 @@ int radio_start(void);
 int radio_tune(int frequency);
 int radio_status(u8 *status, int max);
 int sd_read(u32 sector, void *buf);
+/* When set, sd_read (and with it the file functions below) reads its
+ * sectors through this instead of the installed software's program: a
+ * program with a card processor program of its own (examples/linkbench)
+ * keeps the FAT code. */
+extern int (*sd_reader)(u32 sector, void *buf);
+/* A word of the installed software's card processor program's memory,
+ * asked of it as its driver asks: space 0 the processor's registers
+ * (0x3800-0x383f), 1 its data memory.  0, or -1 without an answer.
+ * After sd_init or sd_attach. */
+int sd_peek(int space, u16 addr, u16 *value);
 int sd_load(const char *name, void *to, u32 max, u32 *size);
 /* Part of a file of the top directory (named as for sd_load), for data
  * read as it is needed.  sd_open finds the file and walks its chain of
