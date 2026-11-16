@@ -513,6 +513,19 @@ word at a time where they can.  `malloc` hands out pieces of a block of
 RAM the program gives to `heap_init` (`sdk/src/heap.c`) and `free` gives
 nothing back.  Floating point is switched off (`-m4-nofpu`).
 
+An example may build some of its files otherwise: a file `flags` beside
+its sources, a line for each such file, its name and the options that
+replace `-m4-nofpu -Os` (`sdk/examples/dvd/flags`: `-O2` for the
+decoders, `-m4` for those in floating point).  This GCC's `-m4` takes
+FPSCR.PR to be set (double precision) between functions and clears it
+inside those that work in single precision, so a program with such
+code sets FPSCR to 0x000c0001 before any of it runs (the stock software
+leaves 0x00040001); the kit's interrupt code does not touch the FPU.
+`font_glyph` gives the 5x7 font's rows for drawing text elsewhere than
+on the kit's own surface, and `pcm_dma` takes samples through P2
+(uncached), which it then need not write back: that is how
+`sdk/examples/dvd` feeds one transfer of 47 s that it writes ahead of.
+
 Code from elsewhere goes in `sdk/third_party/NAME/`, with its licence;
 an example that uses it names it in a file `libs` beside its sources,
 and `build.sh` compiles every `.c` of it with `-O2` and the few C
