@@ -124,10 +124,12 @@ int pcm_dma(const s16 *lr, u32 frames)
     if (pcm_dma_busy())
         return -2;
     base = dma[which];
-    /* The controller reads memory, not the cache. */
+    /* The controller reads memory, not the cache (nothing to do for
+     * samples written through P2, which the cache does not hold). */
     end = (u32)lr + 4 * frames;
-    for (a = (u32)lr & ~31u; a < end; a += 32)
-        __asm__ volatile("ocbwb @%0" : : "r"(a) : "memory");
+    if (((u32)lr >> 29) != 5)
+        for (a = (u32)lr & ~31u; a < end; a += 32)
+            __asm__ volatile("ocbwb @%0" : : "r"(a) : "memory");
     /* On-demand mode (DDT, all eight channels), round-robin, on. */
     REG32(DMAOR) |= 0xc301;
     REG32(base + 0) = (u32)lr;

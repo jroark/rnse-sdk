@@ -75,7 +75,12 @@ void interrupt(void)
          * (pcm_stream). */
         pcm_interrupt();
     } else {
+        /* A source nobody serves: returning would only bring it back
+         * (a level-held one at once, for ever).  Treated as an
+         * exception: shown, and the unit left to the watchdog. */
         unexpected(0, code, 0);
+        for (;;)
+            ;
     }
 }
 
