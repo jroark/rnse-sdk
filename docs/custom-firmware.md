@@ -216,7 +216,10 @@ A Linux kernel comes from a card the same way: `sdk/examples/linuxboot`
 as `RNSE.BIN` reads `VMLINUX.BIN` from the card and starts it.  See
 [linux.md](linux.md).  Doom too: `sdk/examples/doomboot` as `DOOM.BIN`
 reads the game and the shareware WAD from the card and starts it.  See
-[doom.md](doom.md).
+[doom.md](doom.md).  And Quake: `sdk/examples/quakeboot` as `QUAKE.BIN`
+starts the game, which reads its data from the card as it needs it
+(`sd_open` walks a file's chain of clusters once, `sd_pread` reads any
+part of it), see [quake.md](quake.md).
 
 ### Sound
 
@@ -510,14 +513,17 @@ Samples of a program's own go out of a processor's converter with
 `pcm_start` and `pcm_put` or `pcm_dma`, and without gaps with
 `pcm_stream`, a ring of blocks the DMA controller plays one after the
 other, each started from the last one's interrupt (Doom's sound,
-[doom.md](doom.md)).
+[doom.md](doom.md)), or as a sound card would, with `pcm_loop`: the
+ring played round and round with no block to wait for, and
+`pcm_loop_pos` where the controller is in it (Quake's sound,
+[quake.md](quake.md)).
 
 A program bigger than the loader's place is loaded by one in it and
 entered with `image_enter` (`sdk/src/enter.c`: everything stopped, the
 caches seen to); it goes back to the SD loader through the first one's
 `loader_return`, which it sets as `loader_return_via`
 (`sdk/src/wayback.c`).  `linuxboot` does the first half for Linux,
-`doomboot` both for Doom.
+`doomboot` both for Doom, `quakeboot` both for Quake.
 
 There is no C library.  What the compiler calls on its own is in
 `sdk/src/libgcc.S` (division, and the block copy it uses for large

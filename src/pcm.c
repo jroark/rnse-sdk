@@ -181,6 +181,7 @@ static u32 ring_frames, ring_blocks, ring_fill;
 static volatile int ring_play = -1;
 static volatile u32 ring_want;
 static volatile u8 ring_ready[PCM_STREAM_MAX];
+static int ring_loop;
 
 static void arm(const s16 *lr, u32 frames)
 {
@@ -201,7 +202,8 @@ void pcm_interrupt(void)
     if (which < 0 || !ring)
         return;
     if (p >= 0) {
-        ring_ready[p] = 0;
+        if (!ring_loop)
+            ring_ready[p] = 0;
         ring_want = ((u32)p + 1) % ring_blocks;
     }
     if (ring_ready[ring_want]) {
@@ -259,11 +261,48 @@ void pcm_stream_ready(void)
     ring_fill = (ring_fill + 1) % ring_blocks;
 }
 
+int pcm_loop(s16 *buf, u32 frames, u32 blocks)
+{
+    u32 a, i;
+    int r;
+    /* Nothing of the ring left in the cache: a dirty line written back
+     * later would put old samples over the program's. */
+    for (a = (u32)buf & ~31u; a < (u32)buf + 4 * frames * blocks; a += 32)
+        __asm__ volatile("ocbp @%0" : : "r"(a) : "memory");
+    r = pcm_stream(buf, frames, blocks);
+    if (r)
+        return r;
+    for (i = 0; i < blocks; i++)
+        ring_ready[i] = 1;
+    ring_loop = 1;
+    return 0;
+}
+
+u32 pcm_loop_pos(void)
+{
+    int p;
+    u32 left;
+    if (!ring || !ring_loop)
+        return 0;
+    /* The block and the words still to go of it, read again when the
+     * interrupt moved on to the next block in between. */
+    do {
+        p = ring_play;
+        left = REG32(dma[which] + 8);
+    } while (p != ring_play);
+    if (p < 0)
+        return 0;
+    if (left > 2 * ring_frames)
+        left = 2 * ring_frames;
+    return umod((u32)p * ring_frames + ring_frames - left / 2, ring_frames * ring_blocks);
+}
+
 void pcm_stream_stop(void)
 {
     if (!ring)
         return;
     ring = 0;
+    ring_loop = 0;
     REG16(IPRC) &= (u16)~0x0f00;
     if (which >= 0) {
         REG32(dma[which] + 12) = 0x00080020;
