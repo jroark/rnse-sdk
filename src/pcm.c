@@ -124,10 +124,12 @@ int pcm_dma(const s16 *lr, u32 frames)
     if (pcm_dma_busy())
         return -2;
     base = dma[which];
-    /* The controller reads memory, not the cache. */
+    /* The controller reads memory, not the cache (nothing to do for
+     * samples written through P2, which the cache does not hold). */
     end = (u32)lr + 4 * frames;
-    for (a = (u32)lr & ~31u; a < end; a += 32)
-        __asm__ volatile("ocbwb @%0" : : "r"(a) : "memory");
+    if (((u32)lr >> 29) != 5)
+        for (a = (u32)lr & ~31u; a < end; a += 32)
+            __asm__ volatile("ocbwb @%0" : : "r"(a) : "memory");
     /* On-demand mode (DDT, all eight channels), round-robin, on. */
     REG32(DMAOR) |= 0xc301;
     REG32(base + 0) = (u32)lr;
@@ -166,11 +168,158 @@ int pcm_dma_busy(void)
     return 0;
 }
 
+/* Streaming: a ring of blocks that the DMA controller plays one after
+ * the other without a gap, each transfer started from the end of the
+ * last one's interrupt (DMTE7 for processor 0, DMTE3 for 1, at level
+ * 9 through IPRC; hw192.c hands them to pcm_interrupt).  The program
+ * fills the blocks in order (pcm_stream_block, pcm_stream_ready); when
+ * the next one is not ready in time a block of silence plays instead,
+ * and the ring goes on with it afterwards. */
+#define IPRC 0xffd0000c
+#define SILENCE 256
+static s16 silence[2 * SILENCE] __attribute__((aligned(32)));
+static s16 *ring;
+static u32 ring_frames, ring_blocks, ring_fill;
+static volatile int ring_play = -1;
+static volatile u32 ring_want;
+static volatile u8 ring_ready[PCM_STREAM_MAX];
+static int ring_loop;
+
+static void arm(const s16 *lr, u32 frames)
+{
+    u32 base = dma[which];
+    /* Stopped, its end flag cleared: the flag clears by a write of 0
+     * after it has been read as 1 (the SH-4 manual), so read first. */
+    (void)REG32(base + 12);
+    REG32(base + 12) = 0x000a1024;
+    REG32(base + 0) = (u32)lr;
+    REG32(base + 4) = port[which];
+    REG32(base + 8) = 2 * frames;
+    REG32(base + 12) = 0x000a1025; /* as pcm_dma, and an interrupt at the end */
+}
+
+void pcm_interrupt(void)
+{
+    int p = ring_play;
+    if (which < 0 || !ring)
+        return;
+    if (p >= 0) {
+        if (!ring_loop)
+            ring_ready[p] = 0;
+        ring_want = ((u32)p + 1) % ring_blocks;
+    }
+    if (ring_ready[ring_want]) {
+        ring_play = (int)ring_want;
+        arm(ring + 2 * ring_frames * ring_want, ring_frames);
+    } else {
+        ring_play = -1;
+        arm(silence, SILENCE);
+    }
+}
+
+int pcm_stream(s16 *buf, u32 frames, u32 blocks)
+{
+    u32 a, i;
+    if (which < 0 || blocks < 2 || blocks > PCM_STREAM_MAX || ((u32)buf & 31) || (frames & 7))
+        return -1;
+    pcm_stream_stop();
+    ring = buf;
+    ring_frames = frames;
+    ring_blocks = blocks;
+    ring_fill = 0;
+    ring_want = 0;
+    ring_play = -1;
+    for (i = 0; i < blocks; i++)
+        ring_ready[i] = 0;
+    for (i = 0; i < 2 * SILENCE; i++)
+        silence[i] = 0;
+    for (a = (u32)silence; a < (u32)silence + sizeof silence; a += 32)
+        __asm__ volatile("ocbwb @%0" : : "r"(a) : "memory");
+    REG16(IPRC) = (u16)((REG16(IPRC) & ~0x0f00) | 0x0900);
+    REG32(DMAOR) |= 0xc301;
+    REG8(selector[which]) = select_on[which];
+    arm(silence, SILENCE);
+    return 0;
+}
+
+s16 *pcm_stream_block(void)
+{
+    if (!ring || ring_ready[ring_fill])
+        return 0;
+    return ring + 2 * ring_frames * ring_fill;
+}
+
+void pcm_stream_ready(void)
+{
+    u32 a, start, end;
+    if (!ring || ring_ready[ring_fill])
+        return;
+    /* The controller reads memory, not the cache. */
+    start = (u32)(ring + 2 * ring_frames * ring_fill);
+    end = start + 4 * ring_frames;
+    for (a = start; a < end; a += 32)
+        __asm__ volatile("ocbwb @%0" : : "r"(a) : "memory");
+    ring_ready[ring_fill] = 1;
+    ring_fill = (ring_fill + 1) % ring_blocks;
+}
+
+int pcm_loop(s16 *buf, u32 frames, u32 blocks)
+{
+    u32 a, i;
+    int r;
+    /* Nothing of the ring left in the cache: a dirty line written back
+     * later would put old samples over the program's. */
+    for (a = (u32)buf & ~31u; a < (u32)buf + 4 * frames * blocks; a += 32)
+        __asm__ volatile("ocbp @%0" : : "r"(a) : "memory");
+    r = pcm_stream(buf, frames, blocks);
+    if (r)
+        return r;
+    for (i = 0; i < blocks; i++)
+        ring_ready[i] = 1;
+    ring_loop = 1;
+    return 0;
+}
+
+u32 pcm_loop_pos(void)
+{
+    int p;
+    u32 left;
+    if (!ring || !ring_loop)
+        return 0;
+    /* The block and the words still to go of it, read again when the
+     * interrupt moved on to the next block in between. */
+    do {
+        p = ring_play;
+        left = REG32(dma[which] + 8);
+    } while (p != ring_play);
+    if (p < 0)
+        return 0;
+    if (left > 2 * ring_frames)
+        left = 2 * ring_frames;
+    return umod((u32)p * ring_frames + ring_frames - left / 2, ring_frames * ring_blocks);
+}
+
+void pcm_stream_stop(void)
+{
+    if (!ring)
+        return;
+    ring = 0;
+    ring_loop = 0;
+    REG16(IPRC) &= (u16)~0x0f00;
+    if (which >= 0) {
+        REG32(dma[which] + 12) = 0x00080020;
+        REG32(DMAOR) &= ~0x0300u;
+        REG8(selector[which]) |= 0x1f;
+        REG8(selector[which]) |= 0x40;
+    }
+}
+
 void pcm_stop(void)
 {
     int i;
     if (which < 0)
         return;
+    pcm_stream_stop();
     if (REG32(dma[which] + 12) & 1) {
         REG32(dma[which] + 12) = 0x00080020;
         REG32(DMAOR) &= ~0x0300u;

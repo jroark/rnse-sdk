@@ -119,8 +119,18 @@ void delay_ms(u32 ms)
         cpu_idle();
 }
 
+static char *hex8(char *p, u32 v)
+{
+    int i;
+    for (i = 28; i >= 0; i -= 4)
+        *p++ = "0123456789ABCDEF"[(v >> i) & 15];
+    return p;
+}
+
 void unexpected(u32 expevt, u32 intevt, u32 spc)
 {
+    char text[40], *p;
+    const char *k;
     console_puts("\nunexpected exception: EXPEVT=");
     console_hex(expevt);
     console_puts(" INTEVT=");
@@ -128,6 +138,27 @@ void unexpected(u32 expevt, u32 intevt, u32 spc)
     console_puts(" SPC=");
     console_hex(spc);
     console_puts("\n");
+    /* On the screen as well, since a unit has nothing on its debug port:
+     * what happened and where.  Only for as long as the unit stays up:
+     * the caller then waits with interrupts blocked, nothing serves the
+     * watchdog, and the unit resets into its own software, which can
+     * open the display and eject the disc.  Serving the watchdog from
+     * here to keep the screen up would leave eject and the display key
+     * dead for as long as it does (CLAUDE.md, "Mandatory hardware
+     * behavior"). */
+    screen_palette(0, 0, 0, 0);
+    screen_palette(1, 255, 255, 255);
+    screen_fill(0, 0, screen_width, 44, 0);
+    screen_text(4, 4, "UNEXPECTED EXCEPTION", 1, 2);
+    p = text;
+    for (k = "EXPEVT "; *k; k++)
+        *p++ = *k;
+    p = hex8(p, expevt);
+    for (k = " PC "; *k; k++)
+        *p++ = *k;
+    p = hex8(p, spc);
+    *p = 0;
+    screen_text(4, 26, text, 1, 2);
 }
 
 void screen_fill(int x, int y, int w, int h, u8 colour)
@@ -136,6 +167,16 @@ void screen_fill(int x, int y, int w, int h, u8 colour)
     for (j = 0; j < h; j++)
         for (i = 0; i < w; i++)
             screen_pixel(x + i, y + j, colour);
+}
+
+/* A picture of w x h pixels, a row every `pitch` bytes, at (x, y), a
+ * pixel at a time (the 192's hardware layer has a faster one). */
+__attribute__((weak)) void screen_blit(int x, int y, int w, int h, const u8 *pixels, int pitch)
+{
+    int i, j;
+    for (j = 0; j < h; j++)
+        for (i = 0; i < w; i++)
+            screen_pixel(x + i, y + j, pixels[j * pitch + i]);
 }
 
 /* 5x7 font: seven rows a glyph, bit 4 the left column. */
@@ -194,7 +235,7 @@ static const struct {
     { '=', G(00000, 00000, 11111, 00000, 11111, 00000, 00000) },
 };
 
-static const u8 *glyph(char c)
+const u8 *font_glyph(char c)
 {
     unsigned i;
     if (c >= 'a' && c <= 'z')
@@ -212,7 +253,7 @@ static const u8 *glyph(char c)
 void screen_text(int x, int y, const char *s, u8 colour, int scale)
 {
     for (; *s; s++, x += 6 * scale) {
-        const u8 *g = glyph(*s);
+        const u8 *g = font_glyph(*s);
         int row, col;
         if (!g)
             continue;

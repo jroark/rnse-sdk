@@ -82,6 +82,10 @@ and read failures remain on the loader screen. Removal while reading must
 fail the load rather than execute a partial image. Remove the card before
 changing files on a computer, then reinsert it.
 
+`sdk/examples/dvd` is one such program, a DVD player: `DVD.BIN` on the
+card, and the loader's disc taken out for a DVD once it runs
+([dvd.md](dvd.md)).
+
 ## RAM and return contract
 
 Payloads use the existing SDK 192 layout at `0x8df00000`, a declared 128 KiB

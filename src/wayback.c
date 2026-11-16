@@ -205,8 +205,12 @@ static int session_valid(void)
            SESSION[1] == ~SESSION_MAGIC && SESSION[2] == LOADER_BASE && SESSION[3] < 2;
 }
 
+void (*loader_return_via)(int status);
+
 int loader_active(void)
 {
+    if (loader_return_via)
+        return 1;
     return session_valid() && SESSION[4] == 1;
 }
 
@@ -290,6 +294,12 @@ void loader_return(int status)
     volatile u32 *stub = (volatile u32 *)0xac7c1000;
     volatile u32 *params = (volatile u32 *)0xac7c1800;
     u32 i, sum = 0;
+    if (loader_return_via) {
+        /* A bigger image (image_enter): the program in the loader's
+         * place, which started it, does the rest. */
+        loader_return_via(status);
+        return;
+    }
     if (!session_valid() || SESSION[4] != 1)
         return;
     /* (The watchdog strobed meanwhile: a caller may have had interrupts

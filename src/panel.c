@@ -18,6 +18,7 @@ static u8 rx[24];
 static int rx_len;
 static u32 rx_time;
 static u8 keys[6];
+static u8 pressed[6]; /* went down since panel_pressed last said so */
 static int knobs[2];
 static int started;       /* the controller has announced itself */
 static const u8 *setting; /* next frame of panel_settings to send */
@@ -70,8 +71,10 @@ static void frame(void)
             keys[i] = 0;
         break;
     case 0x0c:
-        for (i = 0; i < 6 && i < n; i++)
+        for (i = 0; i < 6 && i < n; i++) {
+            pressed[i] |= (u8)(d[i] & ~keys[i]);
             keys[i] = d[i];
+        }
         break;
     case 0x0d:
         if (n >= 3) {
@@ -180,6 +183,16 @@ int panel_key(int key)
     if (key < 0 || key >= 48)
         return 0;
     return keys[key >> 3] >> (key & 7) & 1;
+}
+
+int panel_pressed(int key)
+{
+    int r;
+    if (key < 0 || key >= 48)
+        return 0;
+    r = pressed[key >> 3] >> (key & 7) & 1;
+    pressed[key >> 3] &= (u8)~(1u << (key & 7));
+    return r;
 }
 
 int panel_knob(int knob)

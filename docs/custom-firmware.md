@@ -214,7 +214,12 @@ image formatted by macOS).
 
 A Linux kernel comes from a card the same way: `sdk/examples/linuxboot`
 as `RNSE.BIN` reads `VMLINUX.BIN` from the card and starts it.  See
-[linux.md](linux.md).
+[linux.md](linux.md).  Doom too: `sdk/examples/doomboot` as `DOOM.BIN`
+reads the game and the shareware WAD from the card and starts it.  See
+[doom.md](doom.md).  And Quake: `sdk/examples/quakeboot` as `QUAKE.BIN`
+starts the game, which reads its data from the card as it needs it
+(`sd_open` walks a file's chain of clusters once, `sd_pread` reads any
+part of it), see [quake.md](quake.md).
 
 ### Sound
 
@@ -447,10 +452,12 @@ no watchpoints yet (GDB then steps instead, slowly).
 `sdk/include/rnse.h`.  In short: `board_init()` brings the board up and
 starts a 10 ms tick; then there is a clock (`millis`, `delay_ms`), text
 on the debug serial port, and a picture of 8 bits per pixel through a
-palette (`screen_pixel`, `screen_fill`, `screen_text`), the way back to
+palette (`screen_pixel`, `screen_fill`, `screen_text`, `screen_blit` for
+a whole picture, a word at a time on the 192), the way back to
 the stock software (`stock_update`, above), and the keys and
 knobs of the faceplate (`panel_init`, `panel_poll`, `panel_key`,
-`panel_knob`), and the CD drive (`cd_init`, `cd_wait_ready`, `cd_read`,
+`panel_knob`; `panel_pressed` for a press that came and went while the
+program was busy), and the CD drive (`cd_init`, `cd_wait_ready`, `cd_read`,
 `cd_find` for a file in the root directory of the disc), and the car's
 CAN bus (`can_init`, `can_send`, `can_receive`), and the fold-down
 display in front of the drive and the card slots (`display_open`,
@@ -500,9 +507,23 @@ emulated bus every 300 ms, `--can-alone` takes every other node away).
 The program keeps to the memory the stock loader's image occupies.  It
 uses no service of the boot ROM.
 
-Not in the kit: sound.  On the 192 it is behind the two signal
-processors of the card board, like the SD cards, which the kit does
-read: see "Programs from an SD card".
+Sound, on the 192, is behind the two signal processors of the card
+board, like the SD cards: see "Programs from an SD card", "Sound".
+Samples of a program's own go out of a processor's converter with
+`pcm_start` and `pcm_put` or `pcm_dma`, and without gaps with
+`pcm_stream`, a ring of blocks the DMA controller plays one after the
+other, each started from the last one's interrupt (Doom's sound,
+[doom.md](doom.md)), or as a sound card would, with `pcm_loop`: the
+ring played round and round with no block to wait for, and
+`pcm_loop_pos` where the controller is in it (Quake's sound,
+[quake.md](quake.md)).
+
+A program bigger than the loader's place is loaded by one in it and
+entered with `image_enter` (`sdk/src/enter.c`: everything stopped, the
+caches seen to); it goes back to the SD loader through the first one's
+`loader_return`, which it sets as `loader_return_via`
+(`sdk/src/wayback.c`).  `linuxboot` does the first half for Linux,
+`doomboot` both for Doom, `quakeboot` both for Quake.
 
 There is no C library.  What the compiler calls on its own is in
 `sdk/src/libgcc.S` (division, and the block copy it uses for large
@@ -512,6 +533,19 @@ little-endian, so their libgcc cannot be linked), so `/` and `%` work;
 word at a time where they can.  `malloc` hands out pieces of a block of
 RAM the program gives to `heap_init` (`sdk/src/heap.c`) and `free` gives
 nothing back.  Floating point is switched off (`-m4-nofpu`).
+
+An example may build some of its files otherwise: a file `flags` beside
+its sources, a line for each such file, its name and the options that
+replace `-m4-nofpu -Os` (`sdk/examples/dvd/flags`: `-O2` for the
+decoders, `-m4` for those in floating point).  This GCC's `-m4` takes
+FPSCR.PR to be set (double precision) between functions and clears it
+inside those that work in single precision, so a program with such
+code sets FPSCR to 0x000c0001 before any of it runs (the stock software
+leaves 0x00040001); the kit's interrupt code does not touch the FPU.
+`font_glyph` gives the 5x7 font's rows for drawing text elsewhere than
+on the kit's own surface, and `pcm_dma` takes samples through P2
+(uncached), which it then need not write back: that is how
+`sdk/examples/dvd` feeds one transfer of 47 s that it writes ahead of.
 
 Code from elsewhere goes in `sdk/third_party/NAME/`, with its licence;
 an example that uses it names it in a file `libs` beside its sources,
