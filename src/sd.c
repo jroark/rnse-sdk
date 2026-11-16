@@ -411,12 +411,16 @@ int sd_init(int which)
     return 0;
 }
 
+int (*sd_reader)(u32 sector, void *buf);
+
 int sd_read(u32 sector, void *buf)
 {
     static const u16 fetch[] = { 0x2203, 0x0001, 0x5000, 0x0100 };
     u8 *out = buf;
     u16 r[9], w;
     int i;
+    if (sd_reader)
+        return sd_reader(sector, buf);
     if (slot < 0)
         return -1;
     /* Where in its memory the processor is to put the sector, and how
@@ -762,6 +766,13 @@ static int peek(u16 space, u16 addr, u16 *value)
     if (get(&w, 1000) || w != 0xd301 || get(&w, 300) || get(value, 300))
         return -1;
     return 0;
+}
+
+int sd_peek(int space, u16 addr, u16 *value)
+{
+    if (slot < 0)
+        return -1;
+    return peek((u16)space, addr, value);
 }
 
 static int output(int on)
