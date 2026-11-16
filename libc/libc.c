@@ -451,6 +451,9 @@ static struct {
     u8 *data;
     long size, room;
     int used, fixed;
+    /* For a file that is not in RAM (Quake's PAK0.PAK, on the card):
+     * where its bytes come from. */
+    long (*read_at)(long at, void *buf, long n);
 } store[FILES];
 
 static FILE streams[FILES + 3] = { { .kind = 0 }, { .kind = 2 }, { .kind = 3 } };
@@ -471,6 +474,23 @@ void files_add_fixed(const char *name, void *data, long size)
             store[i].room = size;
             store[i].used = 1;
             store[i].fixed = 1;
+            return;
+        }
+}
+
+/* A file read through a function of the program's (read only). */
+void files_add_reader(const char *name, long size, long (*read_at)(long at, void *buf, long n))
+{
+    int i;
+    for (i = 0; i < FILES; i++)
+        if (!store[i].used) {
+            memset(&store[i], 0, sizeof store[i]);
+            strncpy(store[i].name, name, NAME - 1);
+            store[i].size = size;
+            store[i].room = size;
+            store[i].used = 1;
+            store[i].fixed = 1;
+            store[i].read_at = read_at;
             return;
         }
 }
@@ -549,7 +569,15 @@ size_t fread(void *buf, size_t size, size_t n, FILE *f)
         want = left < 0 ? 0 : left;
         f->eof = 1;
     }
-    memcpy(buf, store[f->store].data + f->at, (unsigned long)want);
+    if (store[f->store].read_at) {
+        long got = want ? store[f->store].read_at(f->at, buf, want) : 0;
+        if (got < want) {
+            f->eof = 1;
+            want = got < 0 ? 0 : got;
+        }
+    } else {
+        memcpy(buf, store[f->store].data + f->at, (unsigned long)want);
+    }
     f->at += want;
     return (size_t)want / size;
 }

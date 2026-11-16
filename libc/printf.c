@@ -1,6 +1,7 @@
-/* Formatted output and input for Doom on the RNS-E: integers, strings,
- * characters and pointers, with flags, width and precision; no floating
- * point.  scanf knows what the settings file and m_misc.c want: %d %i
+/* Formatted output and input for the kit's C library (Doom, Quake, ...): integers, strings,
+ * characters and pointers, with flags, width and precision; floating
+ * point (%f, %g, %e as %f) only where the program is built with the FPU
+ * (Quake, quake/build.sh), so Doom's build is as it was.  scanf knows what the settings file and m_misc.c want: %d %i
  * %u %x %o %s %c %[...] with widths and %n. */
 #include <ctype.h>
 #include <stdarg.h>
@@ -28,6 +29,80 @@ static void pad(struct out *o, char c, int n)
     while (n-- > 0)
         put(o, c);
 }
+
+#ifdef __SH_FPU_ANY__
+/* A double as %f would print it (prec digits after the point, 6 when
+ * not given; with `general`, %g's way enough for a game's console: the
+ * zeros at the end taken away).  Numbers beyond 2^63 and NaN come out
+ * as "inf" and "nan". */
+static int format_double(char *out, double d, int prec, int general, int plus, int space)
+{
+    char *p = out, digits[24];
+    unsigned high, low;
+    double scale = 1, frac;
+    int i, n = 0;
+    if (prec < 0)
+        prec = 6;
+    if (prec > 9)
+        prec = 9;
+    if (d != d) {
+        strcpy(out, "nan");
+        return 3;
+    }
+    if (d < 0) {
+        *p++ = '-';
+        d = -d;
+    } else if (plus) {
+        *p++ = '+';
+    } else if (space) {
+        *p++ = ' ';
+    }
+    if (d >= 2e18) {
+        strcpy(p, "inf");
+        return (int)(p - out) + 3;
+    }
+    for (i = 0; i < prec; i++)
+        scale *= 10;
+    d += 0.5 / scale;
+    /* The whole part in two halves of nine digits (no conversion to
+     * 64 bits, which would want a helper the kit does not have). */
+    high = (unsigned)(int)(d / 1e9);
+    frac = d - (double)high * 1e9;
+    low = (unsigned)(int)frac;
+    frac -= (double)low;
+    for (i = 0; i < 9 && (low || high || !n); i++) {
+        digits[n++] = (char)('0' + low % 10);
+        low /= 10;
+    }
+    while (high) {
+        digits[n++] = (char)('0' + high % 10);
+        high /= 10;
+    }
+    while (n)
+        *p++ = digits[--n];
+    if (prec) {
+        char *point = p;
+        *p++ = '.';
+        for (i = 0; i < prec; i++) {
+            int digit;
+            frac *= 10;
+            digit = (int)frac;
+            if (digit > 9)
+                digit = 9;
+            *p++ = (char)('0' + digit);
+            frac -= digit;
+        }
+        if (general) {
+            while (p[-1] == '0')
+                p--;
+            if (p - 1 == point)
+                p--;
+        }
+    }
+    *p = 0;
+    return (int)(p - out);
+}
+#endif
 
 int vsnprintf(char *s, size_t n, const char *fmt, va_list ap)
 {
@@ -142,6 +217,29 @@ int vsnprintf(char *s, size_t n, const char *fmt, va_list ap)
                     pad(&o, ' ', width - total);
             }
             break;
+#ifdef __SH_FPU_ANY__
+        case 'f':
+        case 'F':
+        case 'e':
+        case 'E':
+        case 'g':
+        case 'G': {
+            static char fbuf[48];
+            text = fbuf;
+            len = format_double(fbuf, va_arg(ap, double), prec, *fmt == 'g' || *fmt == 'G', plus, space);
+            if (zero && !left && len < width && (fbuf[0] == '-' || fbuf[0] == '+' || fbuf[0] == ' ')) {
+                put(&o, fbuf[0]);
+                pad(&o, '0', width - len);
+                text = fbuf + 1;
+                len--;
+                width = 0;
+            } else if (zero && !left) {
+                pad(&o, '0', width - len);
+                width = 0;
+            }
+            goto string;
+        }
+#endif
         case 'c':
             buf[0] = (char)va_arg(ap, int);
             text = buf;

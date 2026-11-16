@@ -456,6 +456,15 @@ int pcm_stream(s16 *buf, u32 frames, u32 blocks);
 s16 *pcm_stream_block(void);
 void pcm_stream_ready(void);
 void pcm_stream_stop(void);
+/* A sound card's way: the ring played round and round by the DMA
+ * controller with nothing to say a block is ready, and pcm_loop_pos
+ * the frame (0 .. frames * blocks - 1) it plays now, so that a program
+ * mixes ahead of it (Quake's snd_dma.c does).  The controller reads
+ * memory and not the cache: pcm_loop purges the ring from the cache,
+ * and the program writes it through P2 (address | 0x20000000) or
+ * writes its cache back itself.  pcm_stream_stop ends it. */
+int pcm_loop(s16 *buf, u32 frames, u32 blocks);
+u32 pcm_loop_pos(void);
 /* From the interrupt handler: the end of a streaming transfer. */
 void pcm_interrupt(void);
 void pcm_stop(void);
