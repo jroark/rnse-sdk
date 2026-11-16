@@ -70,8 +70,17 @@ void interrupt(void)
     } else if (code == 0x340) {
         /* Level 5: the CAN controller. */
         can_interrupt();
+    } else if (code == 0x7e0 || code == 0x6a0) {
+        /* DMTE7, DMTE3: the end of a transfer to a card processor
+         * (pcm_stream). */
+        pcm_interrupt();
     } else {
+        /* A source nobody serves: returning would only bring it back
+         * (a level-held one at once, for ever).  Treated as an
+         * exception: shown, and the unit left to the watchdog. */
         unexpected(0, code, 0);
+        for (;;)
+            ;
     }
 }
 
@@ -112,6 +121,27 @@ void screen_pixel(int x, int y, u8 colour)
     /* The chip is little-endian and the bus is not: pixel N of the
      * surface is the byte at address N ^ 3. */
     REG8(VRAM + SURFACE + ((y * STRIDE + x) ^ 3)) = colour;
+}
+
+void screen_blit(int x, int y, int w, int h, const u8 *pixels, int pitch)
+{
+    int i, j;
+    if (x < 0 || y < 0 || x + w > screen_width || y + h > screen_height)
+        return;
+    if ((x | w | pitch | (int)(u32)pixels) & 3) {
+        for (j = 0; j < h; j++)
+            for (i = 0; i < w; i++)
+                screen_pixel(x + i, y + j, pixels[j * pitch + i]);
+        return;
+    }
+    /* Four pixels a word: pixel N is the byte at N ^ 3, so the word
+     * holds them in the reverse of their order in memory. */
+    for (j = 0; j < h; j++) {
+        volatile u32 *to = (volatile u32 *)(VRAM + SURFACE + (y + j) * STRIDE + x);
+        const u32 *from = (const u32 *)(pixels + j * pitch);
+        for (i = 0; i < w / 4; i++)
+            to[i] = __builtin_bswap32(from[i]);
+    }
 }
 
 /* The faceplate controller: serial channel 3 of the companion chip, and

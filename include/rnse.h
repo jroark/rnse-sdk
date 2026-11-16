@@ -48,6 +48,10 @@ extern const int screen_width, screen_height;
 void screen_palette(int index, u8 r, u8 g, u8 b);
 void screen_pixel(int x, int y, u8 colour);
 void screen_fill(int x, int y, int w, int h, u8 colour);
+/* A picture of w x h pixels, one byte each, a row every `pitch` bytes,
+ * at (x, y).  On the 192, x, w, pitch and the address multiples of 4
+ * go a word at a time. */
+void screen_blit(int x, int y, int w, int h, const u8 *pixels, int pitch);
 /* Text in a 5x7 font, each dot `scale` pixels square.  Upper case,
  * digits and a little punctuation. */
 void screen_text(int x, int y, const char *s, u8 colour, int scale);
@@ -70,6 +74,11 @@ void panel_poll(void);
 int panel_online(void);
 /* Is this key down?  KEY_* below. */
 int panel_key(int key);
+/* Has this key gone down since the last time this said so?  A press
+ * and its release can both arrive between two looks at panel_key in a
+ * program that is busy for a while (Doom loading a level): this one
+ * still sees it. */
+int panel_pressed(int key);
 /* Detents turned since the last call: positive is clockwise for the
  * select knob and "louder" for the volume knob. */
 int panel_knob(int knob);
@@ -339,12 +348,21 @@ void restart(void);
 /* Another program of this kind, from memory, in this one's place: see
  * src/wayback.c.  With sd_load, programs come from an SD card. */
 int run_image(void *image, u32 bytes);
+/* A bigger image than the loader's place holds, loaded into RAM by a
+ * program in that place (sdk/src/enter.c; the 192): everything stopped,
+ * the operand cache written back over [start, end), the instruction
+ * cache invalidated, then a jump to entry.  Returns -1 on the 193. */
+int image_enter(u32 entry, u32 start, u32 end);
 /* Cooperative SD loader session (192). Returns only outside a session.
  * main() completion calls this automatically. Reserve 0x8c7c0000..0x8c800000. */
 void loader_return(int status);
 /* Whether this program runs in a loader session (and so has a loader
  * to return to). */
 int loader_active(void);
+/* For such a bigger image: the loader_return of the program that
+ * started it, which stays in the loader's place.  Set, loader_active
+ * says 1 and loader_return goes through it. */
+extern void (*loader_return_via)(int status);
 /* Loader-side helpers: blocked is a two-bit mask of consumed insertions.
  * loader_run returns only on rejection; loader_returned consumes a completed
  * session and returns its slot, or -1 when this is a fresh launch. */
@@ -411,6 +429,21 @@ int pcm_dma_busy(void);
  * program that streams in blocks looks at before it does anything long,
  * so that the next block is started in time. */
 u32 pcm_dma_left(void);
+/* Sound without gaps: a ring of `blocks` (2 to PCM_STREAM_MAX) blocks
+ * of `frames` stereo samples each (a multiple of 8) at buf (aligned to
+ * 32 bytes), played by DMA one after the other, the next started from
+ * the last one's end-of-transfer interrupt.  The program fills them in
+ * order: pcm_stream_block gives the next one to fill, or 0 while it is
+ * still queued or playing; pcm_stream_ready says it is filled.  A block
+ * not ready in time is heard as a short silence.  pcm_stream_stop ends
+ * it (pcm_stop does as well). */
+#define PCM_STREAM_MAX 16
+int pcm_stream(s16 *buf, u32 frames, u32 blocks);
+s16 *pcm_stream_block(void);
+void pcm_stream_ready(void);
+void pcm_stream_stop(void);
+/* From the interrupt handler: the end of a streaming transfer. */
+void pcm_interrupt(void);
 void pcm_stop(void);
 
 /* Called from the vector code for anything but the tick. */
