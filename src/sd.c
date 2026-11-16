@@ -496,9 +496,17 @@ int sd_attach(int which)
     return -13;
 }
 
+/* The sector of the table of clusters read last, kept apart from `sec`:
+ * a long file's chain lies in few sectors of it, and reading one for
+ * each cluster made a walk along it cost as much again as the file.
+ * Forgotten at every mount (the card may be another). */
+static u8 fat_sec[512];
+static u32 fat_sec_at = 0xffffffff;
+
 static int mount(void)
 {
     u32 first = 0, fats, per_fat, reserved, total, clusters;
+    fat_sec_at = 0xffffffff;
     if (sd_read(0, sec))
         return -1;
     if (sec[510] != 0x55 || sec[511] != 0xaa)
@@ -530,21 +538,32 @@ static int mount(void)
     return 0;
 }
 
+static int fat_sector(u32 n)
+{
+    if (n == fat_sec_at)
+        return 0;
+    fat_sec_at = 0xffffffff;
+    if (sd_read(n, fat_sec))
+        return -1;
+    fat_sec_at = n;
+    return 0;
+}
+
 static u32 next_cluster(u32 c)
 {
     u32 at = fat32 ? c * 4 : fat12 ? c + c / 2 : c * 2, v;
-    if (sd_read(fat_start + at / 512, sec))
+    if (fat_sector(fat_start + at / 512))
         return 0xffffffff;
     if (!fat12)
-        return fat32 ? le32(sec + (at & 511)) & 0x0fffffff : le16(sec + (at & 511));
+        return fat32 ? le32(fat_sec + (at & 511)) & 0x0fffffff : le16(fat_sec + (at & 511));
     /* Twelve bits, which may lie across two sectors. */
-    v = sec[at & 511];
+    v = fat_sec[at & 511];
     if ((at & 511) == 511) {
-        if (sd_read(fat_start + at / 512 + 1, sec))
+        if (fat_sector(fat_start + at / 512 + 1))
             return 0xffffffff;
-        v |= (u32)sec[0] << 8;
+        v |= (u32)fat_sec[0] << 8;
     } else {
-        v |= (u32)sec[(at & 511) + 1] << 8;
+        v |= (u32)fat_sec[(at & 511) + 1] << 8;
     }
     return c & 1 ? v >> 4 : v & 0xfff;
 }
@@ -651,6 +670,71 @@ int sd_load(const char *name, void *to, u32 max, u32 *size)
             if (sd_idle)
                 sd_idle();
         }
+    }
+    return 0;
+}
+
+/* Part of a file, for a program that reads its data as it needs it
+ * (Quake's PAK0.PAK, 18 MB, of which a level wants a few).  sd_open
+ * walks the file's chain of clusters once, into the caller's array; a
+ * read then goes straight to the sectors. */
+int sd_open(const char *name, struct sd_file *f, u32 *chain, u32 max)
+{
+    u32 cluster = 0, size = 0, c, n = 0, bytes;
+    int r = find(name, &cluster, &size);
+    if (r)
+        return r;
+    bytes = per_cluster * 512;
+    f->size = size;
+    f->per_cluster = per_cluster;
+    f->data_start = data_start;
+    /* (Not size + bytes - 1: that overflows for a file near 4 GiB.) */
+    f->clusters = udiv(size, bytes);
+    if (size - f->clusters * bytes)
+        f->clusters++;
+    f->chain = chain;
+    if (!chain)
+        return 0;
+    if (f->clusters > max)
+        return -3;
+    for (c = cluster; n < f->clusters; c = next_cluster(c)) {
+        if (last(c))
+            return -4;
+        chain[n++] = c;
+        if (sd_idle && (n & 63) == 0)
+            sd_idle();
+    }
+    return 0;
+}
+
+int sd_pread(const struct sd_file *f, u32 offset, void *buf, u32 n)
+{
+    static u8 part[512];
+    u8 *out = buf;
+    u32 bytes = f->per_cluster * 512;
+    if (!f->chain || offset > f->size || n > f->size - offset)
+        return -3;
+    while (n) {
+        u32 index = udiv(offset, bytes), within = offset - index * bytes;
+        u32 sector = f->data_start + (f->chain[index] - 2) * f->per_cluster + within / 512;
+        u32 at = within & 511, take = 512 - at;
+        if (take > n)
+            take = n;
+        if (take == 512) {
+            if (sd_read(sector, out))
+                return -1;
+        } else {
+            /* The head or the tail of the range: by way of a sector of
+             * our own. */
+            if (sd_read(sector, part))
+                return -1;
+            memcpy(out, part + at, take);
+        }
+        out += take;
+        offset += take;
+        n -= take;
+        if (sd_idle)
+            sd_idle();
     }
     return 0;
 }
