@@ -283,6 +283,20 @@ int radio_tune(int frequency);
 int radio_status(u8 *status, int max);
 int sd_read(u32 sector, void *buf);
 int sd_load(const char *name, void *to, u32 max, u32 *size);
+/* Part of a file of the top directory (named as for sd_load), for data
+ * read as it is needed.  sd_open finds the file and walks its chain of
+ * clusters into `chain`, which has room for `max` of them; with chain
+ * 0 it only fills in size and clusters (how many the chain wants).  0,
+ * or as sd_load, -3 the chain longer than max, -4 the chain broken.
+ * sd_pread reads n bytes from offset (any, within the file) to buf: 0,
+ * -1 a read failed, -3 past the end.  Both call sd_idle between
+ * sectors.  The card must stay the one opened. */
+struct sd_file {
+    u32 size, clusters, per_cluster, data_start;
+    u32 *chain;
+};
+int sd_open(const char *name, struct sd_file *f, u32 *chain, u32 max);
+int sd_pread(const struct sd_file *f, u32 offset, void *buf, u32 n);
 
 /* What the hardware layer provides to the drive code: the task file
  * (register 0..7 as in ATA: 1 error/features, 2 interrupt reason, 4 and
