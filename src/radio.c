@@ -65,6 +65,43 @@ static int frame(u8 *data, int max, int *n, u32 ms)
     return cmd;
 }
 
+/* The keep-alive: the stock software sends the radio processor 81 [06]
+ * once a minute, every minute, and nothing else regularly; a unit
+ * running a program that sent it nothing (the SD loader's menu, Linux)
+ * was restarted into the stock software after about seven minutes.
+ * What the frame means is not known.  It is sent here as the stock
+ * software sends it, transmitter on only for the frame, without waiting
+ * for the acknowledgement (radio_command throws away whatever it finds
+ * waiting): some 6 ms of the line at most, so that panel_service can do
+ * it between two blocks of sound.  The first call sends at once. */
+void radio_keepalive(void)
+{
+    static const u8 frame[6] = { 0x01, 0x81, 0x00, 0x01, 0x06, 0x76 };
+    static u32 last;
+    static int sent;
+    u16 control;
+    u32 start;
+    int i;
+    if (screen_width != 400 || (sent && millis() - last < 60000))
+        return;
+    sent = 1;
+    last = millis();
+    control = REG16(UART1 + 0x04);
+    REG16(UART1 + 0x08) = REG16(UART1 + 0x08) & 0xffc7;
+    REG16(UART1 + 0x04) = (u16)((control | 0x0030) & ~0x00c4);
+    for (i = 0; i < 6; i++) {
+        start = millis();
+        while ((REG16(UART1 + 0x08) & 0x0200) && millis() - start < 20)
+            ;
+        REG16(UART1 + 0x06) = frame[i];
+    }
+    /* Status bit 2: the last bit has left the line. */
+    start = millis();
+    while (!(REG16(UART1 + 0x08) & 0x0004) && millis() - start < 20)
+        ;
+    REG16(UART1 + 0x04) = control;
+}
+
 /* The command number of the last answer: the command's own, or 0x20
  * for an acknowledgement. */
 int radio_answered;

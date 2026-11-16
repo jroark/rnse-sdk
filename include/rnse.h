@@ -245,6 +245,12 @@ void firmware_guard(u32 arg);
  * with its data; the answer's data goes to `answer` and its length is
  * returned, negative when no answer came in three tries. */
 int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max);
+/* The radio processor's keep-alive, 81 [06], as the stock software sends
+ * it once a minute: without it a unit restarts into the stock software
+ * after about seven minutes.  Call it often (panel_service does): it
+ * sends at the first call and then when a minute has passed, and takes
+ * some 6 ms when it does.  192 only. */
+void radio_keepalive(void);
 #define RADIO_CD 1
 #define RADIO_TUNER 3
 #define RADIO_DECODER 4

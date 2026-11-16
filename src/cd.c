@@ -251,4 +251,6 @@ void panel_service(void)
     display_follow_key();
     cd_follow_key();
     follow_return();
+    /* (The radio processor's keep-alive, once a minute: radio.c.) */
+    radio_keepalive();
 }
