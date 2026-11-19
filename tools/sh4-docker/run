@@ -4,7 +4,7 @@
 # directory on the PATH and sdk/build.sh (and with it the SDK's tests)
 # find a cross compiler:
 #
-#     PATH=$PWD/tools/sh4-docker:$PATH sdk/build.sh 192 hello
+#     PATH=$PWD/sdk/tools/sh4-docker:$PATH sdk/build.sh 192 hello
 #
 # The image is built from the Dockerfile here the first time.
 here=$(cd "$(dirname "$0")" && pwd)

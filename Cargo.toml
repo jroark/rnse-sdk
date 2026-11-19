@@ -1,0 +1,15 @@
+# The SDK's tests: its programs built with build.sh and run on the
+# emulator (tests/emulated.rs).  No Rust code of its own; the SDK is C.
+# Inside the rnse repository this is a member of its workspace and uses
+# the emulator from the directory above; on its own it takes the `rnse`
+# crate from git (see split/PLAN.md in rnse).
+[package]
+name = "rnse-sdk"
+version = "0.1.0"
+edition = "2021"
+description = "Tests of the RNS-E SDK's programs on the rnse emulator"
+license = "MIT"
+publish = false
+
+[dev-dependencies]
+rnse = { path = ".." }
