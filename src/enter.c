@@ -41,7 +41,7 @@ int image_enter(u32 entry, u32 start, u32 end)
     REG16(0xa7b0001e) = 0;
     /* (With an edge on the watchdog's strobe every 64 KiB: a purge of
      * all of RAM unstrobed outlasted the watchdog's 105 ms on a unit,
-     * docs/linux.md, and the time an ocbp takes there is not known.) */
+     * rnse-linux's docs/linux.md, and the time an ocbp takes there is not known.) */
     for (a = start & ~31u; a < end; a += 32) {
         __asm__ volatile ("ocbp @%0" : : "r"(a) : "memory");
         if (!(a & 0xffff))
