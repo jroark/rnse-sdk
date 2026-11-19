@@ -6,7 +6,33 @@
 #
 #     PATH=$PWD/sdk/tools/sh4-docker:$PATH sdk/build.sh 192 hello
 #
+# The container sees the current directory and, for every absolute path
+# among the arguments (a source file, -I/dir, ...), the git working tree
+# it is in (or its directory, outside one), each at its own path: a
+# program kept outside the kit, in this repository or a repository of
+# its own, builds with its neighbours' headers in reach.
+#
 # The image is built from the Dockerfile here the first time.
 here=$(cd "$(dirname "$0")" && pwd)
 docker image inspect rnse-sh4-cross >/dev/null 2>&1 || docker build -q -t rnse-sh4-cross "$here" >&2 || exit 1
-exec docker run --rm -e EXTRA_CFLAGS -v "$PWD":"$PWD" -w "$PWD" rnse-sh4-cross "$(basename "$0")" "$@"
+root() {
+    d=$1
+    [ -d "$d" ] || d=$(dirname "$d")
+    while [ ! -d "$d" ] && [ "$d" != / ]; do d=$(dirname "$d"); done
+    git -C "$d" rev-parse --show-toplevel 2>/dev/null || (cd "$d" && pwd)
+}
+mounts=" $PWD "
+for arg in "$@"; do
+    case $arg in
+        -I/*) path=${arg#-I} ;;
+        /*) path=$arg ;;
+        *) continue ;;
+    esac
+    r=$(root "$path")
+    case $mounts in *" $r "*) ;; *) mounts="$mounts$r " ;; esac
+done
+set -- -e EXTRA_CFLAGS -w "$PWD" rnse-sh4-cross "$(basename "$0")" "$@"
+for m in $mounts; do
+    set -- -v "$m":"$m" "$@"
+done
+exec docker run --rm "$@"

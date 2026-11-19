@@ -45,11 +45,21 @@ mkdir -p "$objdir"
 # EXTRA_CFLAGS: for instance -DWAIT=5 for the probe.
 cflags="-g -mb -m4-nofpu -Os -ffreestanding -fno-builtin -fno-pic -fno-stack-protector -Wall -Wextra -Iinclude $EXTRA_CFLAGS"
 # An example that uses code of third_party/ (its file `libs`, below)
-# sees that code's headers.
+# sees that code's headers.  A line with a slash in it is a directory
+# relative to the example's own (code kept beside a program in a
+# repository of its own: ../third_party/h264bsd); the kit's C library
+# headers come from its third_party/libc either way.
 libs=""
-[ -f "$dir/libs" ] && libs=$(cat "$dir/libs")
+if [ -f "$dir/libs" ]; then
+    for lib in $(cat "$dir/libs"); do
+        case $lib in
+            */*) libs="$libs $(cd "$dir/$lib" && pwd)" ;;
+            *) libs="$libs third_party/$lib" ;;
+        esac
+    done
+fi
 for lib in $libs; do
-    cflags="$cflags -Ithird_party/$lib"
+    cflags="$cflags -I$lib"
 done
 [ -n "$libs" ] && cflags="$cflags -Ithird_party/libc"
 objs=""
@@ -71,13 +81,14 @@ for src in src/crt0.S src/common.c src/heap.c src/libgcc.S src/cache.S src/panel
     objs="$objs $obj"
 done
 # Code from elsewhere that an example names in its file `libs`, one
-# directory of third_party/ a line, built for speed and with the few C
-# library headers it wants from third_party/libc.
+# directory a line (of third_party/, or relative to the example), built
+# for speed and with the few C library headers it wants from
+# third_party/libc.
 for lib in $libs; do
-    for src in third_party/$lib/*.c; do
-        obj=$objdir/$lib-$(basename "$src" .c).o
+    for src in "$lib"/*.c; do
+        obj=$objdir/$(basename "$lib")-$(basename "$src" .c).o
         ${CROSS}gcc -g -mb -m4-nofpu -O2 -ffreestanding -fno-builtin -fno-pic -fno-stack-protector \
-            -Ithird_party/libc -Ithird_party/$lib $EXTRA_CFLAGS -c -o "$obj" "$src"
+            -Ithird_party/libc -I"$lib" $EXTRA_CFLAGS -c -o "$obj" "$src"
         objs="$objs $obj"
     done
 done

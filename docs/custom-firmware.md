@@ -218,7 +218,7 @@ this is a precaution.  Not yet run on a unit.
 None of that was what stopped the 512 MB card, as `linkbench` showed
 on the unit the same day (its card tests, run with the RP2040 bridge in
 the other slot carrying the program and the results:
-[sdbridge.md](sdbridge.md)).  With the words of `sd_init`'s exchange
+[sdbridge.md](../sdbridge/docs/sdbridge.md)).  With the words of `sd_init`'s exchange
 kept, the card went through its busy rounds and answered its last
 ACMD41 ready; what went unanswered was the CMD55 after that, the step
 "once more without the claim" that the driver asks of a standard card
@@ -597,7 +597,7 @@ Code from elsewhere goes in `sdk/third_party/NAME/`, with its licence;
 an example that uses it names it in a file `libs` beside its sources,
 and `build.sh` compiles every `.c` of it with `-O2` and the few C
 library headers in `sdk/third_party/libc`.  So far there is one,
-`h264bsd`, an H.264 decoder (see `docs/android-auto.md`).
+`h264bsd`, an H.264 decoder (see `sdbridge/docs/android-auto.md`).
 
 A program that computes much should set the caches up for itself:
 the stock setting the program finds (CCR 0x80008181) writes every store
@@ -606,7 +606,7 @@ memory, and gives code and data within one 32 MB half of each cache.
 `cache_setup(CCR_EMODE | CCR_ICE | CCR_OCE | CCR_CB)` (`sdk/src/cache.S`)
 writes the operand cache back and changes that safely; on the 192 it
 made the H.264 decoder of `sdk/examples/h264bench` two to three times
-as fast (`docs/android-auto.md`).  With P1 copy-back, data the program
+as fast (`sdbridge/docs/android-auto.md`).  With P1 copy-back, data the program
 hands to a device by DMA has to be written back first (`ocbwb`), as it
 already must through P0.
 
