@@ -23,7 +23,7 @@
  *
  * The processor's card interface is not used by this program: a card
  * in that slot cannot be read while it plays (pcm_stop, then sd_init).
- * See docs/android-auto.md. */
+ * See sdbridge/docs/android-auto.md. */
 #include "rnse.h"
 
 #define STATUS 0xb2400001 /* bits 2, 0: nothing to read; 3, 1: cannot take a word */
