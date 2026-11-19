@@ -82,9 +82,9 @@ and read failures remain on the loader screen. Removal while reading must
 fail the load rather than execute a partial image. Remove the card before
 changing files on a computer, then reinsert it.
 
-`sdk/examples/dvd` is one such program, a DVD player: `DVD.BIN` on the
+`ports/dvd/dvd` is one such program, a DVD player: `DVD.BIN` on the
 card, and the loader's disc taken out for a DVD once it runs
-([dvd.md](dvd.md)).
+([dvd.md](../ports/docs/dvd.md)).
 
 ## RAM and return contract
 
