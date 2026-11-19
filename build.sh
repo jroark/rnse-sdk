@@ -3,10 +3,21 @@
 # The result, out/<example>-<unit>.bin, is the image from the module's
 # entry points on; `rnse custom` puts it on a copy of an update disc.
 # Needs sh4-linux-gnu-gcc (any SH-4 GCC will do, set CROSS).
+#
+# The example is the name of a directory of examples/ or, given with a
+# slash in it, the path of a directory anywhere else (a program kept in
+# a repository of its own: sdk/build.sh 192 ../doom/boot).  Its output
+# is named after the directory's last component either way.
 set -e
-cd "$(dirname "$0")"
 unit=${1:?unit: 192 or 193}
 example=${2:-hello}
+case $example in
+    */*) dir=$(cd "$example" && pwd); example=$(basename "$dir") ;;
+    *) dir="" ;;
+esac
+cd "$(dirname "$0")"
+[ -n "$dir" ] || dir=examples/$example
+[ -d "$dir" ] || { echo "no example $dir" >&2; exit 1; }
 if [ "$example" = modern ] && [ "$unit" != 192 ]; then
     echo "modern firmware supports the 192 only" >&2
     exit 1
@@ -29,7 +40,7 @@ cflags="-g -mb -m4-nofpu -Os -ffreestanding -fno-builtin -fno-pic -fno-stack-pro
 # An example that uses code of third_party/ (its file `libs`, below)
 # sees that code's headers.
 libs=""
-[ -f examples/$example/libs ] && libs=$(cat examples/$example/libs)
+[ -f "$dir/libs" ] && libs=$(cat "$dir/libs")
 for lib in $libs; do
     cflags="$cflags -Ithird_party/$lib"
 done
@@ -39,11 +50,11 @@ objs=""
 # generation, a line each: the file's name and the options that take
 # the place of -m4-nofpu -Os (-m4 for code that uses the
 # FPU, which the kit's own code leaves alone; -O2 for speed).
-for src in src/crt0.S src/common.c src/heap.c src/libgcc.S src/cache.S src/panel.c src/display.c src/cd.c src/can.c src/sd.c src/pcm.c src/radio.c src/flash.c src/wayback.c src/enter.c src/hw$unit.c examples/$example/*.c; do
+for src in src/crt0.S src/common.c src/heap.c src/libgcc.S src/cache.S src/panel.c src/display.c src/cd.c src/can.c src/sd.c src/pcm.c src/radio.c src/flash.c src/wayback.c src/enter.c src/hw$unit.c "$dir"/*.c; do
     obj=$objdir/$(basename "$src" | sed 's/\.[cS]$/.o/')
     own=""
     case $src in
-        examples/*) [ -f examples/$example/flags ] && own=$(awk -v f="$(basename "$src")" '$1 == f { $1 = ""; print }' examples/$example/flags) ;;
+        "$dir"/*) [ -f "$dir/flags" ] && own=$(awk -v f="$(basename "$src")" '$1 == f { $1 = ""; print }' "$dir/flags") ;;
     esac
     if [ -n "$own" ]; then
         ${CROSS}gcc $(echo "$cflags" | sed 's/-m4-nofpu -Os//') $own -c -o "$obj" "$src"

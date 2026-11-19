@@ -11,7 +11,7 @@ Requires Rust, Python 3 and the SDK SH-4 cross compiler. On macOS the existing
 Docker wrapper is available:
 
 ```sh
-export PATH="$PWD/tools/sh4-docker:$PATH"
+export PATH="$PWD/sdk/tools/sh4-docker:$PATH"
 export RNSE_DISC=/absolute/path/to/stock-update.iso
 sdk/modern.sh
 ```
@@ -21,8 +21,8 @@ the existing installer preserves. Artifacts are ignored by Git:
 
 - `sdk/out/modern-192.bin` and `.elf`: firmware and debug symbols.
 - `sdk/out/app-trip.RNA`: example native app.
-- `out/modern/modern-192.iso`: install image with swap recovery loader.
-- `out/modern/apps.img`: SD image containing the trip calculator.
+- `sdk/out/modern/modern-192.iso`: install image with swap recovery loader.
+- `sdk/out/modern/apps.img`: SD image containing the trip calculator.
 
 The default update index is 0390; set `RNSE_INDEX` to an appropriate newer
 index if required by the unit's installed index. Never distribute the disc
@@ -173,14 +173,14 @@ can require a power cycle; RETURN cannot preempt it.
 ```sh
 sdk/tests/check-modern.sh
 cargo test --release --lib
-PATH="$PWD/tools/sh4-docker:$PATH" RNSE_DISC="$RNSE_DISC" \
+PATH="$PWD/sdk/tools/sh4-docker:$PATH" RNSE_DISC="$RNSE_DISC" \
   RNSE_BOOT_ROM=/path/to/bootrom-192-unit.bin \
-  cargo test --release --test disc modern_ -- --nocapture
+  cargo test --release -p rnse-sdk --test emulated modern_ -- --nocapture
 ```
 
 The resident test requires a cross compiler and verifies strict execution,
 real decoded SD audio, native app input/exit, corrupt-app rejection and SRAM
-persistence. It writes screenshots into `out/modern/`. The installation test
+persistence. It writes screenshots into `sdk/out/modern/`. The installation test
 also needs the dumped boot ROM; without it that test skips. Existing recovery
 and guard tests remain applicable.
 

@@ -153,7 +153,7 @@ card.
 
 Before direct return was added, the original restart-based path was tested
 in the emulator in both slots, with the stock software and
-a unit's boot ROM at both ends (`tests/disc.rs`,
+a unit's boot ROM at both ends (`sdk/tests/emulated.rs`,
 `programs_come_from_an_sd_card`).  On a unit (a North American 192
 with software 0371, a 32 MB card formatted FAT16 by macOS, in either
 slot) it runs: the card processor takes its program, the card starts in
@@ -280,7 +280,7 @@ heard is the radio processor's business, which has the amplifier:
 same).  `sdk/examples/player` is a player made of the two with the
 faceplate's keys and knobs.  In the emulator it plays the test file's
 two tones out of the speaker at the right pitch on the right sides
-and the volume knob moves the amplifier (`tests/disc.rs`,
+and the volume knob moves the amplifier (`sdk/tests/emulated.rs`,
 `sdk_player_plays_an_mp3`).  Standard cards only.
 
 On a unit (the North American 192, the player from a 32 MB card, a
@@ -365,7 +365,7 @@ what to put in, and restarts the unit when a disc has gone in and is
 ready.  Always make a firmware disc with it.
 
 In the emulator, under a unit's boot ROM and with arbitrary RAM and the
-caches modelled, all of it runs (`tests/disc.rs`,
+caches modelled, all of it runs (`sdk/tests/emulated.rs`,
 `a_program_is_installed_in_flash_and_taken_out_again`,
 `a_firmware_disc_left_in_the_drive_does_not_install_again` and
 `a_program_in_flash_that_never_gets_going_takes_itself_out`): the
@@ -444,8 +444,8 @@ software may not do) and what `8a` is for are not known.
 
 You need an SH-4 GCC that can produce big-endian code without its
 libraries; Debian's and Ubuntu's `gcc-sh4-linux-gnu` will do.  Where
-there is none to install (macOS), `tools/sh4-docker` runs that one in a
-container: `PATH=$PWD/tools/sh4-docker:$PATH sdk/build.sh 192`.
+there is none to install (macOS), `sdk/tools/sh4-docker` runs that one in a
+container: `PATH=$PWD/sdk/tools/sh4-docker:$PATH sdk/build.sh 192`.
 
     sdk/build.sh 193                 # or 192; writes sdk/out/hello-193.bin
     rnse custom disc.iso V574 sdk/out/hello-193.bin hello.iso
@@ -745,7 +745,7 @@ its ends read; it stays open for the disc change, whose CD EJECT is
 behind it, and closes after), and at the end the watchdog: the
 strobe stops and records follow every 10 ms until the unit is reset,
 which is how long the watchdog waits.  It writes nothing anywhere and ends in a restart, so the disc
-can be used again.  `tests/disc.rs` runs it against the emulator's own
+can be used again.  `sdk/tests/emulated.rs` runs it against the emulator's own
 models; the header of `main.c` has the records.
 
 ### What it would settle
@@ -764,7 +764,7 @@ runs in the emulator (`docs/boot-rom.md`, "The real one, in the
 emulator").
 
 In the emulator the program reads back the emulator's own stand-ins
-(`tests/disc.rs`, `report_program_sends_the_boot_rom`), which proves
+(`sdk/tests/emulated.rs`, `report_program_sends_the_boot_rom`), which proves
 the plumbing and nothing about a unit.  The registers of the 192's
 list are in the SH7750R's manual and reading them does nothing; that
 the processor in the package is one where that holds is likely and
@@ -1041,7 +1041,7 @@ Not tried on the unit: receiving on CAN.
 
 ## What this does and does not establish
 
-Established, by the tests in `tests/disc.rs`: the examples build and
+Established, by the tests in `sdk/tests/emulated.rs`: the examples build and
 behave as written on both emulated units; and the stock software of
 both units, European and North American, running in the emulator,
 takes a disc made by `rnse custom` with a higher index for an update,
