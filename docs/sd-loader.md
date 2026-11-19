@@ -37,7 +37,7 @@ Every file `NAME.BIN` in the card's top directory that could be a
 program is one (up to nine): names starting with `_`, the Mac's `._`
 files, are left out, and so is any `.BIN` larger than a program can be
 (0x1c000 bytes), such as the Linux kernel `VMLINUX.BIN` that
-`linuxboot` reads ([linux.md](linux.md)).
+`linuxboot` reads ([linux.md](../linux/docs/linux.md)).
 With one on the card, it runs when the card goes in, as before.  With
 several, the loader shows a menu: the select knob, NEXT and PREV
 choose, SELECT runs.  When the program returns, the menu comes back

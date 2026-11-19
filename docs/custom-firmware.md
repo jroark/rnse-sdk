@@ -258,9 +258,9 @@ Three things a unit taught on the way:
 What has not run on a unit: a high-capacity card, FAT12 and FAT32 (in the emulator each reads a card
 image formatted by macOS).
 
-A Linux kernel comes from a card the same way: `sdk/examples/linuxboot`
+A Linux kernel comes from a card the same way: `linux/linuxboot`
 as `RNSE.BIN` reads `VMLINUX.BIN` from the card and starts it.  See
-[linux.md](linux.md).  Doom too: `ports/doom/doomboot` as `DOOM.BIN`
+[linux.md](../linux/docs/linux.md).  Doom too: `ports/doom/doomboot` as `DOOM.BIN`
 reads the game and the shareware WAD from the card and starts it.  See
 [doom.md](../ports/docs/doom.md).  And Quake: `ports/quake/quakeboot` as `QUAKE.BIN`
 starts the game, which reads its data from the card as it needs it
