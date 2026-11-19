@@ -179,15 +179,113 @@ static int run(int slot, const char *name, u8 *image, u32 blocked, u32 flags)
 
 /* A card to start from: its card processor, and the programs on it.
  * Returns how many there are, or the error. */
+/* "WHAT 1234", the number in hex. */
+static void hex(const char *what, u32 v, int digits)
+{
+    char text[40], *p = text;
+    while (*what)
+        *p++ = *what++;
+    *p++ = ' ';
+    while (digits--)
+        *p++ = "0123456789ABCDEF"[(v >> (4 * digits)) & 15];
+    *p = 0;
+    say(text, 1);
+}
+
+/* The first words of a failed sd_restart, small, below the error
+ * lines, eleven to a line: what the loader said in white, what the
+ * processor answered in orange (the console has ">" and "<").  And each
+ * on CAN with its time (item 0x40 + n: the word, 0x10000 for the
+ * loader's; the time in milliseconds from the start of sd_restart). */
+static void dump(const u16 *w, const u16 *ms, const u8 *host, u32 n)
+{
+    char line[80], word[5];
+    u32 i, k, p = 0;
+    int y = 30 + 14 * 9;
+    for (i = 0; i < n; i++) {
+        if (i % 11 == 0)
+            screen_fill(0, y * s, screen_width, 9 * s, 0);
+        for (k = 0; k < 4; k++)
+            word[k] = "0123456789ABCDEF"[(w[i] >> (4 * (3 - k))) & 15];
+        word[4] = 0;
+        screen_text((8 + 30 * (int)(i % 11)) * s, y * s, word, host[i] ? 1 : 2, s);
+        line[p++] = host[i] ? '>' : '<';
+        for (k = 0; k < 4; k++)
+            line[p++] = word[k];
+        line[p++] = ' ';
+        if (i % 11 == 10 || i + 1 == n) {
+            line[p] = 0;
+            console_puts(line);
+            console_puts("\n");
+            y += 9;
+            p = 0;
+        }
+        record((u8)(0x40 + i), (u32)w[i] | (u32)host[i] << 16, ms[i]);
+    }
+}
+
+/* Slots the loader has seen empty since it started: a card in one of
+ * them has gone in since, and nobody has started it. */
+static int seen_empty[2];
+
 static int open_card(int slot, u8 *image)
 {
-    int r;
+    int r, attached = 1, restarted = 0, i;
+    u16 last[4];
+    static u16 words[48], times[48];
+    static u8 from_host[48];
+    u32 heard = 0;
     row = 2;
     number("SLOT", slot + 1);
-    r = sd_attach(slot);
-    if (r)
+    /* The card as the stock software or the last program left it; else
+     * a card that has gone in since, started as the stock driver starts
+     * one (sd_restart); else the processor too, from its reset.  A card
+     * that the loader saw go in is not asked for a sector first: the
+     * stock driver's first words to such a card are its start, on the
+     * slow clock, and a sector read would go to it on the fast clock of
+     * the card before.  Each answer goes out as well: sd_attach's as
+     * item 4 + slot (1: not tried), sd_restart's as 6 + slot, and where
+     * sd_restart stopped as 8 + slot (the command, the answer's header
+     * and its first word). */
+    if (!seen_empty[slot]) {
+        attached = sd_attach(slot);
+        record((u8)(4 + slot), (u32)attached, 0);
+    }
+    r = attached;
+    if (r) {
+        /* (The first 48 words of it kept, with their times, for when
+         * it fails: see dump below.) */
+        sd_heard_n = 0;
+        sd_heard_from = millis();
+        sd_heard_first = 1;
+        r = restarted = sd_restart(slot);
+        sd_heard_first = 0;
+        heard = sd_heard_n < 48 ? sd_heard_n : 48;
+        for (i = 0; i < (int)heard; i++) {
+            words[i] = sd_heard[i];
+            times[i] = sd_heard_ms[i];
+            from_host[i] = sd_heard_host[i];
+        }
+        record((u8)(6 + slot), (u32)restarted, 0);
+        record((u8)(8 + slot), (u32)sd_last[0] << 16 | sd_last[1], sd_last[2]);
+    }
+    for (i = 0; i < 4; i++)
+        last[i] = sd_last[i];
+    if (r && r != -2)
         r = sd_init(slot);
     record((u8)slot, (u32)r, 0);
+    if (r && r != -2) {
+        if (attached == 1)
+            say("NEW CARD: NOT ATTACHED", 1);
+        else
+            number("ATTACH:", attached);
+        number("RESTART:", restarted);
+        hex("RESTART STOPPED AT", last[0], 4);
+        hex("ANSWER", (u32)last[1] << 16 | last[2], 8);
+        dump(words, times, from_host, heard);
+    }
+    if (!r)
+        seen_empty[slot] = 0;
     if (r == -2) {
         say("NEEDS V222 0371 INSTALLED SOFTWARE", 2);
         return r;
@@ -342,7 +440,11 @@ int main(void)
             }
             if (millis() - changed[slot] < 100)
                 continue;
+            if (stable[slot] && !present)
+                sd_card_out(slot); /* as the stock driver says it */
             stable[slot] = present;
+            if (!present)
+                seen_empty[slot] = 1;
             if (!stable[slot]) {
                 armed[slot] = 1;
                 if (menu_slot == slot) {

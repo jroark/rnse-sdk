@@ -71,13 +71,46 @@ u16 sd_last[4];
  * start, and a real card wants the time. */
 void (*sd_idle)(void);
 
+/* How deep the program is in exchanges with the processor: a message
+ * and its answer, a sector, a card's start.  RETURN held for two
+ * seconds does not end a program in the middle of one (cd.c), so that
+ * the loader it goes back to finds the processor between two messages.
+ * (In the emulator the processor's program drops half a message by
+ * itself after a while; this does not count on that.) */
+static int busy;
+void panel_return_due(void); /* cd.c: a return to the loader put off */
+
+int sd_busy(void)
+{
+    return busy;
+}
+
+static int finish(int r)
+{
+    if (!--busy)
+        panel_return_due();
+    return r;
+}
+
+/* The time between two steps of a card's start (150 ms, the stock
+ * driver's), the voltage window asked for in ACMD41 (0x00ff0000, the
+ * stock driver's) and whether ACMD41 is asked a second time without
+ * CMD55 while a card that answered CMD8 is busy (the stock driver
+ * does): for trying other ways on a card that does not start
+ * (sdk/examples/cardstart). */
+u32 sd_pace = 150, sd_window = 0x00ff0000;
+int sd_no_second_acmd41;
+int sd_unstick, sd_long_cmd55;
+u16 sd_ctl_seen[24];
+int sd_ctl_seen_n;
+
 static void pause(void)
 {
     u32 start = millis();
     /* (A card's start is four seconds of these, and the faceplate
      * controller, which has the screen's light, wants answering in
      * the meantime: whoever has one sets sd_idle to panel_poll.) */
-    while (millis() - start < 150)
+    while (millis() - start < sd_pace)
         if (sd_idle)
             sd_idle();
 }
@@ -107,11 +140,16 @@ static u32 inbox_in, inbox_out;
  * wrong on a unit: 0x8000 set in sd_heard_from for the host's. */
 u16 sd_heard[48];
 u8 sd_heard_host[48];
-u32 sd_heard_n;
+u16 sd_heard_ms[48];
+u32 sd_heard_n, sd_heard_from;
+int sd_heard_first;
 
 static void note(u16 w, int host)
 {
+    if (sd_heard_first && sd_heard_n >= 48)
+        return;
     sd_heard[sd_heard_n % 48] = w;
+    sd_heard_ms[sd_heard_n % 48] = (u16)(millis() - sd_heard_from);
     sd_heard_host[sd_heard_n++ % 48] = (u8)host;
 }
 
@@ -257,14 +295,58 @@ int sd_present(int which)
     return which ? !!(REG8(0xb2900001) & 1) : !!(REG8(0xb2500001) & 0x40);
 }
 
-int sd_init(int which)
+static int start_card(void);
+static int peek(u16 space, u16 addr, u16 *value);
+
+/* (A test's, cardstart: sd_unstick in rnse.h.)  The interface's SDCTL
+ * as the processor's program reads it by pointer, kept; and with 2, its
+ * bit 2 ("a response in") taken down by reading the response register
+ * in threes, as linkbench had to on a unit (docs/hardware.md): an
+ * answer that comes while it is up raises no interrupt. */
+static void unstick(void)
+{
+    u16 v, w;
+    int i, k;
+    if (!sd_unstick)
+        return;
+    for (i = 0; i < 4; i++) {
+        if (peek(0, 0x3814, &v))
+            return;
+        if (sd_ctl_seen_n < 24)
+            sd_ctl_seen[sd_ctl_seen_n++] = v;
+        if (sd_unstick < 2 || !(v & 4))
+            return;
+        for (k = 0; k < 3; k++)
+            if (peek(0, 0x3815, &w))
+                return;
+    }
+}
+
+/* Whether the processor of a slot is let out of reset: a program that
+ * had it play sound leaves it held (pcm_stop), and one held answers
+ * nothing; only sd_init starts it again. */
+static int running(int which)
+{
+    return (REG32(LATCH) & (4u << (which & 1))) != 0;
+}
+
+/* Words the processor still has for whoever talked to it last: thrown
+ * away. */
+static void drain(void)
+{
+    u16 w;
+    int i;
+    for (i = 0; i < 600 && get(&w, 20) == 0; i++)
+        ;
+}
+
+static int init(int which)
 {
     static const u16 start[] = { 0x1202, 0xd762, 0x0034 };
     static const u16 a[] = { 0x7301, 0x0002 }, b[] = { 0x3301, 0x0001 }, c[] = { 0x3101, 0x0001 };
-    static const u16 d[] = { 0x3201, 0x0000 }, e[] = { 0x0301, 0x0000 }, f[] = { 0x0301, 0x0001 }, g[] = { 0x7400 };
-    u16 r[9], rca;
-    u32 t, ocr = 0, hcs, i;
-    int mmc = 0;
+    static const u16 d[] = { 0x3201, 0x0000 };
+    u16 r[9];
+    u32 i;
 
     if (screen_width != 400)
         return -1; /* the 193 has a card interface of its own, and no driver here */
@@ -290,8 +372,21 @@ int sd_init(int which)
             return -4;
     if (answer(r, 9, 1000) < 0)
         return -4;
-    /* The card interface: its slow clock, and the card's start, a step
-     * every 150 ms as the stock driver has it. */
+    return start_card();
+}
+
+/* The card's start, on the processor's program as it runs: what the
+ * stock driver says after the processor's start at boot, and, without
+ * that start, whenever a card goes in later (a card is started anew,
+ * the processor is not).  The card interface: its slow clock, and the
+ * card's start, a step every 150 ms as the stock driver has it. */
+static int start_card(void)
+{
+    static const u16 e[] = { 0x0301, 0x0000 }, f[] = { 0x0301, 0x0001 }, g[] = { 0x7400 };
+    u16 r[9], rca;
+    u32 t, ocr = 0, hcs, i;
+    int mmc = 0;
+
     pause();
     if (poke(0, 0x3814, 0x3802))
         return -5;
@@ -309,17 +404,22 @@ int sd_init(int which)
      * only; to the others the host does not claim to know
      * high-capacity cards. */
     hcs = command(0x0b03, 0x4c08, 0x000001aa, r, 1) ? 0 : 0x40000000;
+again:
     /* The first application command.  A card that leaves it unanswered
      * the stock driver starts anew and asks CMD1, a MultiMediaCard's
      * way; with no answer to that either, CMD55 again, and so round and
-     * round.  (A unit's 512 MB card, which the stock software reads,
-     * left the first CMD55 unanswered.) */
+     * round.  (A unit's 512 MB card seemed to leave the first CMD55
+     * unanswered; it was the second, after the interface was set again
+     * between rounds of ACMD41: see below.) */
     for (i = 0;; i++) {
         pause();
+        unstick();
         if (!command(0x0b03, 0x4c37, 0, r, 1))     /* CMD55 */
             break;
-        if (i == 6)
+        if (i == 6) {
+            unstick();
             return -7;
+        }
         pause();
         if (command(0x0b03, 0x4800, 0, r, 0))      /* CMD0 */
             return -6;
@@ -341,12 +441,18 @@ int sd_init(int which)
         } else {
             if (i) {
                 pause();
-                if (command(0x0b03, 0x4c37, 0, r, 1))
+                unstick();
+                if (command(0x0b03, sd_long_cmd55 ? 0x4c77 : 0x4c37, 0, r, 1)) {
+                    unstick();
                     return -7;
+                }
             }
             pause();
-            if (command(0x0b03, 0x4c29, hcs | 0x00ff0000, r, 1)) /* ACMD41 */
+            unstick();
+            if (command(0x0b03, 0x4c29, hcs | sd_window, r, 1)) { /* ACMD41 */
+                unstick();
                 return -7;
+            }
         }
         ocr = (u32)(r[0] & 0xff) << 24 | (u32)r[1] << 8 | r[2] >> 8;
         if (ocr & 0x80000000)
@@ -355,19 +461,48 @@ int sd_init(int which)
             return -8;
         if (!mmc) {
             pause();
-            if (poke(0, 0x3814, 0x3802))
-                return -5;
+            if (!hcs) {
+                /* A card that left CMD8 unanswered: the interface set
+                 * again between two rounds, as the stock driver has it
+                 * for such a card. */
+                if (poke(0, 0x3814, 0x3802))
+                    return -5;
+            } else if (!sd_no_second_acmd41 && (unstick(), !command(0x0b03, 0x4c29, hcs | sd_window, r, 1))) {
+                /* One that answered it gets ACMD41 once more instead,
+                 * without CMD55 (the stock driver's loop: a card takes
+                 * it for an illegal command and does not answer), and
+                 * not the interface set again: a unit's 512 MB card,
+                 * which the stock driver starts, answered no more after
+                 * that, busy at its first ACMD41.  (Should a card take
+                 * it, its answer counts.) */
+                ocr = (u32)(r[0] & 0xff) << 24 | (u32)r[1] << 8 | r[2] >> 8;
+                if (ocr & 0x80000000)
+                    break;
+            }
         }
     }
     high_capacity = !mmc && (ocr & 0x40000000) != 0;
     if (!mmc && hcs && !high_capacity) {
         /* As the stock driver does for a standard card that answered
-         * CMD8: once more without the claim. */
+         * CMD8: once more without the claim.  A card that is ready by
+         * now need not answer CMD55, which has no place in its state (a
+         * unit's 512 MB card, SD 2.0, left it unanswered: this driver's
+         * "-7" for that card, 2026-11-18).  The stock driver then starts
+         * the card anew, CMD0 and CMD1, and round again as for a card
+         * that did not answer CMD8, which that card takes; so does this
+         * one. */
         pause();
-        if (command(0x0b03, 0x4c37, 0, r, 1))
-            return -7;
+        if (command(0x0b03, 0x4c37, 0, r, 1)) {
+            pause();
+            if (command(0x0b03, 0x4800, 0, r, 0))  /* CMD0 */
+                return -6;
+            pause();
+            (void)command(0x0b03, 0x4c01, 0x00ff0000, r, 1); /* CMD1 */
+            hcs = 0;
+            goto again;
+        }
         pause();
-        if (command(0x0b03, 0x4c29, 0x00ff0000, r, 1))
+        if (command(0x0b03, 0x4c29, sd_window, r, 1))
             return -7;
     }
     pause();
@@ -413,7 +548,7 @@ int sd_init(int which)
 
 int (*sd_reader)(u32 sector, void *buf);
 
-int sd_read(u32 sector, void *buf)
+static int read_sector(u32 sector, void *buf)
 {
     static const u16 fetch[] = { 0x2203, 0x0001, 0x5000, 0x0100 };
     u8 *out = buf;
@@ -458,9 +593,8 @@ static u32 le32(const u8 *p) { return le16(p) | le16(p + 2) << 16; }
  * the processor its program and started the card long before it
  * starts a loader, and both are still as they were.  Nothing is reset
  * and nothing started here; words the processor still had for the old
- * driver are thrown away and a sector is asked for.  This is the way
- * to a card that sd_init cannot start (a unit has one, 512 MB, which
- * the stock software reads), and it takes no time.
+ * driver are thrown away and a sector is asked for.  It takes no
+ * time.
  *
  * Whether the card counts in sectors or bytes is found by trying: the
  * first partition's first sector has to look like one. */
@@ -469,20 +603,19 @@ static int looks_like_a_volume(void)
     return sec[510] == 0x55 && sec[511] == 0xaa && le16(sec + 11) == 512 && sec[13] != 0;
 }
 
-int sd_attach(int which)
+static int attach(int which)
 {
-    u16 w;
     u32 first;
-    int i;
     if (screen_width != 400)
         return -1;
     if (flash_word(0x200000) != 1 || flash_word(0x200004) != 0x3800 || flash_word(0x20380c) != 2 || flash_word(0x203810) != 0x71bc)
         return -2;
+    if (!running(which))
+        return -14;
     slot = which & 1;
     inbox_in = inbox_out = 0;
     high_capacity = 0;
-    for (i = 0; i < 600 && get(&w, 20) == 0; i++)
-        ;
+    drain();
     if (sd_read(0, sec))
         return -12;
     if (sec[510] != 0x55 || sec[511] != 0xaa)
@@ -498,6 +631,69 @@ int sd_attach(int which)
     if (sd_read(first, sec) == 0 && looks_like_a_volume())
         return 0;
     return -13;
+}
+
+int sd_init(int which)
+{
+    busy++;
+    return finish(init(which));
+}
+
+int sd_read(u32 sector, void *buf)
+{
+    busy++;
+    return finish(read_sector(sector, buf));
+}
+
+int sd_attach(int which)
+{
+    busy++;
+    return finish(attach(which));
+}
+
+/* A card that went in after its processor was started (by the stock
+ * software or by sd_init): started on the program as it runs, as the
+ * stock driver starts it, with no reset and no download. */
+static int start_again(int which)
+{
+    if (screen_width != 400)
+        return -1;
+    if (flash_word(0x200000) != 1 || flash_word(0x200004) != 0x3800 || flash_word(0x20380c) != 2 || flash_word(0x203810) != 0x71bc)
+        return -2;
+    if (!running(which))
+        return -14;
+    slot = which & 1;
+    inbox_in = inbox_out = 0;
+    high_capacity = 0;
+    drain();
+    return start_card();
+}
+
+int sd_restart(int which)
+{
+    busy++;
+    return finish(start_again(which));
+}
+
+/* A card gone: as the stock driver says it (0x0200, answered 0xf000),
+ * which stops the card interface's clock until the next start.  The
+ * slot the driver reads stays the one it was. */
+void sd_card_out(int which)
+{
+    int was = slot;
+    u16 w;
+    if (screen_width != 400 || !running(which))
+        return;
+    busy++;
+    slot = which & 1;
+    inbox_in = inbox_out = 0;
+    drain();
+    if (put(0x0200) == 0)
+        while (get(&w, 300) == 0 && w != 0xf000)
+            ;
+    slot = was;
+    inbox_in = inbox_out = 0;
+    finish(0);
 }
 
 /* The sector of the table of clusters read last, kept apart from `sec`:
@@ -788,7 +984,7 @@ static int output(int on)
     return poke(0, 0x3801, on ? v | 0x0040 : v & (u16)~0x0040);
 }
 
-int sd_play(const char *name)
+static int play(const char *name)
 {
     static const u16 a[] = { 0x3301, 0x0081 }, b[] = { 0x3101, 0x0001 };
     u32 cluster = 0, c, n = 0;
@@ -870,7 +1066,7 @@ static int feed(void)
     return 0;
 }
 
-int sd_play_poll(void)
+static int poll_play(void)
 {
     static const u16 done[] = { 0x3901, 0x0000 };
     u16 head, w;
@@ -903,7 +1099,7 @@ int sd_play_poll(void)
     return 1;
 }
 
-void sd_play_stop(void)
+static void stop_play(void)
 {
     u16 w;
     int i;
@@ -919,4 +1115,23 @@ void sd_play_stop(void)
         if (get(&w, 500) || w == 0xf000)
             break;
     output(0);
+}
+
+int sd_play(const char *name)
+{
+    busy++;
+    return finish(play(name));
+}
+
+int sd_play_poll(void)
+{
+    busy++;
+    return finish(poll_play());
+}
+
+void sd_play_stop(void)
+{
+    busy++;
+    stop_play();
+    finish(0);
 }

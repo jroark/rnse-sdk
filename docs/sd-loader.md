@@ -96,6 +96,16 @@ cache maintenance, interrupts masked, timers and DMA stopped, and watchdog
 service during copying. The SDK startup runs again and consumes the return
 status without going through the ROM reset entry.
 
+A program goes back to the loader only between two exchanges with a
+card processor: RETURN held during a read takes effect at the read's
+end (`sd_busy` in `sdk/src/sd.c`, `follow_return` in `sdk/src/cd.c`).
+The loader then takes the card as the program left it (`sd_attach`);
+a card that has gone in since is started the stock driver's way, on
+the processor's program without a reset (`sd_restart`), and only when
+that fails is the processor started anew (`sd_init`).  When all three
+fail the screen says what `sd_attach` and `sd_restart` answered above
+the load error; CAN records 0x7f8 carry them as items 4 and 6 (+ slot).
+
 Reserve `0x8c7c0000..0x8c800000` (including its uncached aliases) in all tests:
 control data starts at `0x8c7c0000`, the restore trampoline and parameters at
 `+0x1000` and `+0x1800`, the recovery stack ends at `0x8c7e0000`, and the

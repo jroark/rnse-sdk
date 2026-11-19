@@ -187,8 +187,54 @@ standard and high-capacity cards so, in 40 ms.  On the unit it read
 that 512 MB card: 30 ms for the card, 50 ms for the file, and a round
 of that restart-based loop is 56.8 s with it, round after round.  It wants the card
 in its slot before the disc goes in, so that the stock software has
-started it.  Three
-things a unit taught on the way:
+started it.
+
+That left the 512 MB card unreadable once it had been out of its slot,
+or after Quake: the persistent loader could not attach it, and
+`sd_init` answered -7.  What was wrong showed when the loader put the
+words of a failed start on the screen: the card is of version 2 and
+answers CMD8, the first CMD55 and the first ACMD41 (busy, as cards are
+at first), and then nothing more.  The notes above, "CMD8 unanswered",
+were mistaken.  Between two rounds of ACMD41 the driver set the card
+interface's register 0x3814 again, which is what the stock driver does
+for a card that leaves CMD8 unanswered (the 32 MB card); for one that
+answers it the stock driver does not, and asks ACMD41 a second time
+without CMD55 instead (a card takes that for an illegal command and
+does not answer), every step 150 ms apart.  The emulator's cards were
+ready at their first ACMD41, so that loop had never run in it; they are
+busy for three rounds now, as real ones are.  The driver follows that
+loop since.  The stock software also never resets a card processor for
+a card that goes in while it runs; it starts the card on the program as
+it runs, and says `0200` to the processor when a card goes
+([hardware.md](hardware.md), "Messages").  `sd_restart` and
+`sd_card_out` do that, and `sdboot` opens a card by `sd_attach` (not
+for a card it saw go in), then `sd_restart`, then `sd_init`; when all
+fail it shows each answer and the first 48 words of the restart (CAN:
+items 4, 6, 8 + slot and 0x40 on).  A program's return to the loader
+waits for the end of an exchange with the processor (`sd_busy`); in the
+emulator the processor's program drops half a message by itself, so
+this is a precaution.  Not yet run on a unit.
+
+None of that was what stopped the 512 MB card, as `linkbench` showed
+on the unit the same day (its card tests, run with the RP2040 bridge in
+the other slot carrying the program and the results:
+[sdbridge.md](sdbridge.md)).  With the words of `sd_init`'s exchange
+kept, the card went through its busy rounds and answered its last
+ACMD41 ready; what went unanswered was the CMD55 after that, the step
+"once more without the claim" that the driver asks of a standard card
+that answered CMD8.  A card that is ready has no application commands
+until it has an address, so it says nothing, and the driver gave up
+with -7.  The stock driver asks the same and gets the same silence,
+and then starts the card anew (CMD0, CMD1) and goes round again as for
+a card that left CMD8 unanswered, which the card takes; `sd_init` does
+that since, and started the card on the unit.  The emulator's card had
+answered CMD55 in any state, so the step never failed there; it answers
+nothing to CMD55 in the ready and identification states now.  (Bit 2 of
+the card interface's SDCTL, which `linkbench` found holding back the
+response interrupt, was not it: the installed program takes it down
+itself, by reading SDCTL after each response's words.)
+
+Three things a unit taught on the way:
 
 - **A card's start wants the stock driver's pace.**  That driver leaves
   150 ms between any two steps.  With the steps one behind the other

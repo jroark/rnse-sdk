@@ -213,6 +213,39 @@ extern void (*sd_idle)(void);
 /* The card as the installed software has started it, with nothing
  * reset: 0, or negative when no sector can be read that way. */
 int sd_attach(int slot);
+/* Not 0 while the driver is in the middle of an exchange with a card
+ * processor (it calls sd_idle meanwhile): RETURN held waits for the end
+ * of it before it ends the program, so that the processor is never
+ * left with half a message for the loader to stumble over. */
+int sd_busy(void);
+/* A card put in after its slot's processor was started (by the stock
+ * software or sd_init): started as the stock driver starts it then, on
+ * the processor's program as it runs, without sd_init's reset.  0, or
+ * as sd_init (-4 and below), -14 the processor is held in reset (a
+ * program played sound on it: sd_init then).  sd_card_out tells the
+ * processor of a slot whose card has gone, as the stock driver does. */
+int sd_restart(int slot);
+/* How a card's start is done, for trying other ways on a card that
+ * will not start (sdk/examples/cardstart): the time between steps in
+ * ms (150), the voltage window of ACMD41 (0x00ff0000), and, set, no
+ * second ACMD41 without CMD55 while a card is busy. */
+extern u32 sd_pace, sd_window;
+extern int sd_no_second_acmd41;
+/* (For a test.)  1: before each CMD55 and ACMD41 of a card's start, and
+ * after the one that failed, the interface's control register SDCTL
+ * (0x3814) read through the processor's program and kept in
+ * sd_ctl_seen; 2: as well, its bit 2 taken down by reading the response
+ * register in threes. */
+extern int sd_unstick;
+/* (For a test.)  CMD55 in the rounds of ACMD41 asked for as a command
+ * with a long answer (0x40 in the register value, as CMD2's), which the
+ * processor's program reads as eight words: the eighth takes the
+ * interface's bit 2 down.  The card answers it short; what the
+ * interface makes of that is not known. */
+extern int sd_long_cmd55;
+extern u16 sd_ctl_seen[24];
+extern int sd_ctl_seen_n;
+void sd_card_out(int slot);
 /* After a failure: the last card command (the interface's command
  * register value), the header of the processor's answer and two words
  * of it. */
@@ -234,6 +267,12 @@ int sd_play(const char *name);
 extern u16 sd_heard[48];
 extern u8 sd_heard_host[48];
 extern u32 sd_heard_n;
+/* With sd_heard_first set (and sd_heard_n cleared) the first 48 words
+ * are kept instead of the last; sd_heard_ms has the time of each, in
+ * milliseconds from sd_heard_from (a millis() value). */
+extern int sd_heard_first;
+extern u16 sd_heard_ms[48];
+extern u32 sd_heard_from;
 int sd_play_poll(void);
 void sd_play_stop(void);
 

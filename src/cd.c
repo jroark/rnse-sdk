@@ -202,10 +202,39 @@ void (*loader_leave)(void);
 int panel_return_to_loader = 1;
 static int return_state; /* 0 not yet seen up, 1 up, 2 down, 3 held */
 static u32 return_since;
-static int return_short, return_held;
+static int return_short, return_held, return_due;
+
+/* The program's own ending (playback stopped and so on), the display at
+ * rest, then the loader; this returns only when the loader's copy is
+ * damaged.  Not in the middle of an exchange with a card processor,
+ * though (panel_service runs in the card driver's waits, sd_idle): then
+ * the card driver calls panel_return_due when the exchange is over. */
+static void to_loader(void)
+{
+    if (sd_busy()) {
+        return_due = 1;
+        return;
+    }
+    return_due = 0;
+    if (loader_leave)
+        loader_leave();
+    display_wait(10000);
+    loader_return(LOADER_RETURN_HELD);
+    return_held = 1;
+}
+
+void panel_return_due(void)
+{
+    if (return_due)
+        to_loader();
+}
 
 static void follow_return(void)
 {
+    if (return_due) {
+        to_loader();
+        return;
+    }
     if (!panel_key(KEY_RETURN)) {
         if (return_state == 2)
             return_short = 1;
@@ -217,16 +246,10 @@ static void follow_return(void)
         return_since = millis();
     } else if (return_state == 2 && millis() - return_since >= 2000) {
         return_state = 3;
-        if (panel_return_to_loader && loader_active()) {
-            /* The program's own ending (playback stopped and so on),
-             * the display at rest, then the loader; this returns only
-             * when the loader's copy is damaged. */
-            if (loader_leave)
-                loader_leave();
-            display_wait(10000);
-            loader_return(LOADER_RETURN_HELD);
-        }
-        return_held = 1;
+        if (panel_return_to_loader && loader_active())
+            to_loader();
+        else
+            return_held = 1;
     }
 }
 
