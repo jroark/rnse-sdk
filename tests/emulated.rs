@@ -48,8 +48,16 @@ fn sdk_example(image: &[u8], model: rnse::board::Model, example: &str) -> Option
     };
     match built {
         Ok(out) if out.status.success() => {}
-        // No cross compiler here: nothing to test.
-        _ => return None,
+        Ok(out) => {
+            // No cross compiler here: nothing to test.  A compiler that
+            // is there and fails (a program that no longer fits, say)
+            // is a failure, not a skip.
+            let text = String::from_utf8_lossy(&out.stderr);
+            assert!(text.contains("gcc: not found") || text.contains("gcc: command not found"),
+                "{} for the {}: the build failed: {}", example, unit, text);
+            return None;
+        }
+        Err(_) => return None,
     }
     let program = std::fs::read(sdk.join(format!("out/{}-{}.bin", example, unit))).unwrap();
     let (custom, places) = fw::custom_loader(image, &v.name, &program).unwrap();
