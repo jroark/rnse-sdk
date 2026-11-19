@@ -295,6 +295,12 @@ extern int (*sd_reader)(u32 sector, void *buf);
  * (0x3800-0x383f), 1 its data memory.  0, or -1 without an answer.
  * After sd_init or sd_attach. */
 int sd_peek(int space, u16 addr, u16 *value);
+/* A command to the card through the installed software's program, as
+ * sd_init sends them: the card interface's command register value (as
+ * 0x4c10 for CMD16: index, 0x400 a response, 0x40 a long one) and the
+ * argument; the processor's answer in r (nine words).  0, or -1 when
+ * none came.  After sd_init or sd_attach. */
+int sd_command(u16 reg, u32 arg, u16 *r);
 int sd_load(const char *name, void *to, u32 max, u32 *size);
 /* Part of a file of the top directory (named as for sd_load), for data
  * read as it is needed.  sd_open finds the file and walks its chain of

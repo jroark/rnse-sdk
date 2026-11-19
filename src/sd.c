@@ -756,6 +756,11 @@ static struct {
 static int extents, playing;
 static u32 play_at, play_size;
 
+int sd_command(u16 reg, u32 arg, u16 *r)
+{
+    return command(0x0b03, reg, arg, r, 1);
+}
+
 static int peek(u16 space, u16 addr, u16 *value)
 {
     u16 m[4] = { 0x2203, space, addr, 1 }, w;
