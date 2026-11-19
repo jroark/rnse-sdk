@@ -9,11 +9,15 @@
  * back to the loader, at the end or at any time.
  *
  * The ways: the stock driver's start (sd_restart, as the loader has
- * it); the same with nothing else done while it waits (no faceplate,
- * the answers read at once); 10 ms between steps instead of 150; the
- * whole voltage window in ACMD41; ACMD41 every 10 ms without the
- * second, CMD55-less one; the processor reset first (sd_init); and the
- * stock start a second after the card went in. */
+ * it); the same with the interface's bit 2 ("a response in") taken
+ * down before each command, by reading the response register in threes
+ * (an answer that comes while it is up raises no interrupt: linkbench
+ * on a unit, docs/hardware.md); and, instead, CMD55 in the rounds of
+ * ACMD41 asked for with a long answer, which the processor's program
+ * reads as eight words (sd_long_cmd55).  Under each result, small:
+ * the interface's control register SDCTL as read before each CMD55 and
+ * ACMD41, and after the one that failed (sd_unstick in rnse.h); on CAN
+ * 0x7f8 as well, 0x31 first: way, which, value. */
 #include "rnse.h"
 
 static int row;
@@ -82,9 +86,37 @@ static void wait_for_removal(int slot)
 }
 
 static const char *const name[] = {
-    "STOCK", "NO WAIT WORK", "10 MS STEPS", "FULL WINDOW", "PLAIN FAST", "PROCESSOR RESET", "1 S LATER",
+    "STOCK", "UNSTICK", "LONG CMD55",
 };
-#define WAYS 7
+#define WAYS 3
+#define ROWS 3 /* a way's: its result, two of SDCTL */
+
+/* The SDCTL values kept in the start, small, nine to a row, and on CAN. */
+static void show_ctl(int way)
+{
+    char text[56], *p;
+    u8 d[8];
+    int i, k;
+    for (k = 0; k < 2; k++) {
+        p = text;
+        for (i = 9 * k; i < 9 * k + 9 && i < sd_ctl_seen_n; i++) {
+            p = put_hex(p, sd_ctl_seen[i], 4);
+            *p++ = ' ';
+        }
+        *p = 0;
+        screen_fill(0, 28 + 18 * row, screen_width, 18, 0);
+        screen_text(16, 32 + 18 * row, text, 1, 1);
+        row++;
+    }
+    for (i = 0; i < sd_ctl_seen_n; i++) {
+        d[0] = 0x31;
+        d[1] = (u8)way;
+        d[2] = (u8)i;
+        d[3] = (u8)(sd_ctl_seen[i] >> 8);
+        d[4] = (u8)sd_ctl_seen[i];
+        can_send_for(0x7f8, d, 5, 3000);
+    }
+}
 
 int main(void)
 {
@@ -108,7 +140,7 @@ int main(void)
     line("TAKE THIS CARD OUT. THEN, EACH", 1);
     line("TIME: CARD IN, WAIT, CARD OUT", 1);
     for (way = 0; way < WAYS; way++) {
-        row = 2 + way;
+        row = 2 + ROWS * way;
         p = put_text(text, "PUT IN: ");
         p = put_text(p, name[way]);
         *p = 0;
@@ -120,26 +152,12 @@ int main(void)
         *p = 0;
         line(text, 2);
         row--;
-        sd_pace = 150;
-        sd_window = 0x00ff0000;
-        sd_no_second_acmd41 = 0;
-        if (way == 1)
-            sd_idle = 0;
-        if (way == 2)
-            sd_pace = 10;
-        if (way == 3)
-            sd_window = 0x00ff8000;
-        if (way == 4) {
-            sd_pace = 10;
-            sd_no_second_acmd41 = 1;
-        }
-        if (way == 6)
-            wait_ms(1000);
-        r = way == 5 ? sd_init(slot) : sd_restart(slot);
-        sd_idle = panel_service;
-        sd_pace = 150;
-        sd_window = 0x00ff0000;
-        sd_no_second_acmd41 = 0;
+        sd_unstick = way == 1 ? 2 : 1;
+        sd_long_cmd55 = way == 2;
+        sd_ctl_seen_n = 0;
+        r = sd_restart(slot);
+        sd_unstick = 0;
+        sd_long_cmd55 = 0;
         p = text;
         *p++ = (char)('1' + way);
         *p++ = ' ';
@@ -170,14 +188,17 @@ int main(void)
         d[6] = (u8)(sd_last[1] >> 8);
         d[7] = (u8)sd_last[1];
         can_send_for(0x7f8, d, 8, 3000);
+        show_ctl(way);
         if (way + 1 < WAYS) {
-            row = 2 + way + 1;
+            row = 2 + ROWS * (way + 1);
             line("TAKE IT OUT", 2);
             wait_for_removal(slot);
         }
     }
-    row = 2 + WAYS;
+    /* (In the instructions' place: the screen is full.) */
+    row = 0;
     line("DONE. HOLD RETURN: LOADER", 2);
+    line("", 2);
     for (;;) {
         panel_service();
         cpu_idle();
