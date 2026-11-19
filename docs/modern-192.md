@@ -11,18 +11,18 @@ Requires Rust, Python 3 and the SDK SH-4 cross compiler. On macOS the existing
 Docker wrapper is available:
 
 ```sh
-export PATH="$PWD/sdk/tools/sh4-docker:$PATH"
+export PATH="$PWD/tools/sh4-docker:$PATH"
 export RNSE_DISC=/absolute/path/to/stock-update.iso
-sdk/modern.sh
+./modern.sh
 ```
 
 Use a V222/0371 update disc. SD access uses its card-processor firmware, which
 the existing installer preserves. Artifacts are ignored by Git:
 
-- `sdk/out/modern-192.bin` and `.elf`: firmware and debug symbols.
-- `sdk/out/app-trip.RNA`: example native app.
-- `sdk/out/modern/modern-192.iso`: install image with swap recovery loader.
-- `sdk/out/modern/apps.img`: SD image containing the trip calculator.
+- `out/modern-192.bin` and `.elf`: firmware and debug symbols.
+- `out/app-trip.RNA`: example native app.
+- `out/modern/modern-192.iso`: install image with swap recovery loader.
+- `out/modern/apps.img`: SD image containing the trip calculator.
 
 The default update index is 0390; set `RNSE_INDEX` to an appropriate newer
 index if required by the unit's installed index. Never distribute the disc
@@ -31,7 +31,7 @@ image: it includes proprietary material from your source disc.
 For a RAM-only preview, without installing into flash:
 
 ```sh
-target/release/rnse custom "$RNSE_DISC" V222 sdk/out/modern-192.bin out/modern/preview.iso
+target/release/rnse custom "$RNSE_DISC" V222 out/modern-192.bin out/modern/preview.iso
 target/release/rnse loader out/modern/preview.iso --variant V222 --strict \
   --cycles 470000000 --screenshot out/modern/preview.png
 ```
@@ -106,7 +106,7 @@ Bluetooth module**. Module discovery/network management, proprietary initializat
 Bluetooth pairing, phonebook synchronization and telephone audio routing still
 need real-module verification and implementation. The UI explicitly identifies
 the missing call audio. Existing amplifier routing remains unchanged. See
-[telephone.md](telephone.md) for reverse-engineered transport evidence. Standard
+[telephone.md](https://github.com/jroark/rnse/blob/main/docs/telephone.md) for reverse-engineered transport evidence. Standard
 call commands follow [3GPP TS 27.007](https://www.etsi.org/deliver/etsi_ts/127000_127099/127007/05.07.00_60/ts_127007v050700p.pdf);
 this specification does not establish factory-module compatibility.
 
@@ -130,9 +130,9 @@ unit. The SDK's existing real-unit installation evidence is documented separatel
 
 ## Native application ABI 1
 
-See `sdk/include/rnse_app.h` and `sdk/apps/trip/main.c`. Build another app by
-placing its source in `sdk/apps/NAME/main.c` and running `sdk/apps/build.sh NAME`.
-Copy `sdk/out/app-NAME.RNA` to the SD root using an 8.3 filename. The firmware
+See `include/rnse_app.h` and `apps/trip/main.c`. Build another app by
+placing its source in `apps/NAME/main.c` and running `apps/build.sh NAME`.
+Copy `out/app-NAME.RNA` to the SD root using an 8.3 filename. The firmware
 itself does not need rebuilding.
 
 Export these C functions:
@@ -171,16 +171,16 @@ can require a power cycle; RETURN cannot preempt it.
 ## Validation
 
 ```sh
-sdk/tests/check-modern.sh
+tests/check-modern.sh
 cargo test --release --lib
-PATH="$PWD/sdk/tools/sh4-docker:$PATH" RNSE_DISC="$RNSE_DISC" \
+PATH="$PWD/tools/sh4-docker:$PATH" RNSE_DISC="$RNSE_DISC" \
   RNSE_BOOT_ROM=/path/to/bootrom-192-unit.bin \
   cargo test --release -p rnse-sdk --test emulated modern_ -- --nocapture
 ```
 
 The resident test requires a cross compiler and verifies strict execution,
 real decoded SD audio, native app input/exit, corrupt-app rejection and SRAM
-persistence. It writes screenshots into `sdk/out/modern/`. The installation test
+persistence. It writes screenshots into `out/modern/`. The installation test
 also needs the dumped boot ROM; without it that test skips. Existing recovery
 and guard tests remain applicable.
 

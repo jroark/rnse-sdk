@@ -1,8 +1,7 @@
 # The SDK's tests: its programs built with build.sh and run on the
 # emulator (tests/emulated.rs).  No Rust code of its own; the SDK is C.
-# Inside the rnse repository this is a member of its workspace and uses
-# the emulator from the directory above; on its own it takes the `rnse`
-# crate from git (see split/PLAN.md in rnse).
+# The emulator, the `rnse` crate, comes from git, pinned to a commit of
+# https://github.com/jroark/rnse (Cargo.lock pins it too).
 [package]
 name = "rnse-sdk"
 version = "0.1.0"
@@ -12,4 +11,13 @@ license = "MIT"
 publish = false
 
 [dev-dependencies]
-rnse = { path = ".." }
+rnse = { git = "https://github.com/jroark/rnse", rev = "0e3a2d4ce5941161e17ff4816126281fbcf80088" }
+
+[profile.release]
+opt-level = 3
+debug = 1
+lto = "thin"
+codegen-units = 4
+
+[profile.dev]
+opt-level = 1

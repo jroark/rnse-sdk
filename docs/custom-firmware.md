@@ -26,7 +26,7 @@ the loader", has the steps.)  A program of your own in that place
 All of that can be watched in the emulator, with the stock software
 doing the starting:
 
-    rnse custom disc.iso V574 sdk/out/hello-193.bin hello.iso --index 0230
+    rnse custom disc.iso V574 out/hello-193.bin hello.iso --index 0230
     rnse boot hello.iso --variant V574 --ignition --installed-index 0220 \
         --cycles 8000000000 --screenshot hello.png
 
@@ -83,7 +83,7 @@ Things to know about it:
   disc's index, and the next custom disc needs a higher one still.
 * It needs nothing but the processor and RAM until the stock loader
   runs: no key, no command of the program's own to the drive.
-  `sdk/examples/probe` does nothing but show a picture, count down a
+  `examples/probe` does nothing but show a picture, count down a
   minute and call it, and is the program to try first.
 * A program that hangs before it gets there is still a trap.  Keep the
   call on a path that cannot be blocked: a timer, as in the probe.
@@ -115,7 +115,7 @@ is left of the program from the instruction cache.
 ## Programs from an SD card
 
 A disc for every program to try is slow and costs a disc.  On the 192
-there is another way once one disc is made: `sdk/examples/sdboot` is a
+there is another way once one disc is made: `examples/sdboot` is a
 loader that goes on that disc, and what it starts is the file
 `RNSE.BIN` in the root directory of a FAT card in either slot, a
 program as `build.sh` makes it.  The stock software starts the loader
@@ -129,16 +129,16 @@ stock firmware. It waits for card removal and reinsertion; RETURN reruns
 an inserted card. See [the persistent loader instructions](sd-loader.md)
 for the return contract, reserved memory, and build commands.
 
-    sdk/build.sh 192 sdboot
-    rnse custom disc.iso V222 sdk/out/sdboot-192.bin sdboot.iso --index 0380
-    sdk/build.sh 192 hello && mkdir card && cp sdk/out/hello-192.bin card/RNSE.BIN
+    ./build.sh 192 sdboot
+    rnse custom disc.iso V222 out/sdboot-192.bin sdboot.iso --index 0380
+    ./build.sh 192 hello && mkdir card && cp out/hello-192.bin card/RNSE.BIN
     rnse card card.img card
     rnse boot sdboot.iso --variant V222 --ignition --installed-index 0370 \
         --sd-card card.img --cycles 9000000000 --screenshot hello.png
 
 The cards are the card processors' (`docs/hardware.md`, "SD card
 processors"), and the SDK has no program for those: `sd_init`
-(`sdk/src/sd.c`) loads the installed software's own, out of the unit's
+(`src/sd.c`) loads the installed software's own, out of the unit's
 flash, the way that software's driver loads it, and then says to it
 what that driver says.  So it works with one installed software, the
 North American 0371, and looks before it starts whether that is what
@@ -153,7 +153,7 @@ card.
 
 Before direct return was added, the original restart-based path was tested
 in the emulator in both slots, with the stock software and
-a unit's boot ROM at both ends (`sdk/tests/emulated.rs`,
+a unit's boot ROM at both ends (`tests/emulated.rs`,
 `programs_come_from_an_sd_card`).  On a unit (a North American 192
 with software 0371, a 32 MB card formatted FAT16 by macOS, in either
 slot) it runs: the card processor takes its program, the card starts in
@@ -206,7 +206,7 @@ busy for three rounds now, as real ones are.  The driver follows that
 loop since.  The stock software also never resets a card processor for
 a card that goes in while it runs; it starts the card on the program as
 it runs, and says `0200` to the processor when a card goes
-([hardware.md](hardware.md), "Messages").  `sd_restart` and
+([hardware.md](https://github.com/jroark/rnse/blob/main/docs/hardware.md), "Messages").  `sd_restart` and
 `sd_card_out` do that, and `sdboot` opens a card by `sd_attach` (not
 for a card it saw go in), then `sd_restart`, then `sd_init`; when all
 fail it shows each answer and the first 48 words of the restart (CAN:
@@ -218,7 +218,7 @@ this is a precaution.  Not yet run on a unit.
 None of that was what stopped the 512 MB card, as `linkbench` showed
 on the unit the same day (its card tests, run with the RP2040 bridge in
 the other slot carrying the program and the results:
-[sdbridge.md](../sdbridge/docs/sdbridge.md)).  With the words of `sd_init`'s exchange
+[sdbridge.md](https://github.com/jroark/rnse-sdbridge/blob/main/docs/sdbridge.md)).  With the words of `sd_init`'s exchange
 kept, the card went through its busy rounds and answered its last
 ACMD41 ready; what went unanswered was the CMD55 after that, the step
 "once more without the claim" that the driver asks of a standard card
@@ -260,12 +260,12 @@ image formatted by macOS).
 
 A Linux kernel comes from a card the same way: `linux/linuxboot`
 as `RNSE.BIN` reads `VMLINUX.BIN` from the card and starts it.  See
-[linux.md](../linux/docs/linux.md).  Doom too: `ports/doom/doomboot` as `DOOM.BIN`
+[linux.md](https://github.com/jroark/rnse-linux/blob/main/docs/linux.md).  Doom too: `ports/doom/doomboot` as `DOOM.BIN`
 reads the game and the shareware WAD from the card and starts it.  See
-[doom.md](../ports/docs/doom.md).  And Quake: `ports/quake/quakeboot` as `QUAKE.BIN`
+[doom.md](https://github.com/jroark/rnse-ports/blob/main/docs/doom.md).  And Quake: `ports/quake/quakeboot` as `QUAKE.BIN`
 starts the game, which reads its data from the card as it needs it
 (`sd_open` walks a file's chain of clusters once, `sd_pread` reads any
-part of it), see [quake.md](../ports/docs/quake.md).
+part of it), see [quake.md](https://github.com/jroark/rnse-ports/blob/main/docs/quake.md).
 
 ### Sound
 
@@ -276,11 +276,11 @@ where the file's bytes are as the stock driver tells it
 sound comes out of the processor's converter, and whether that is
 heard is the radio processor's business, which has the amplifier:
 `radio_source(RADIO_DECODER, volume)` and `radio_volume`
-(`sdk/src/radio.c`, the frames the stock software sends for the
-same).  `sdk/examples/player` is a player made of the two with the
+(`src/radio.c`, the frames the stock software sends for the
+same).  `examples/player` is a player made of the two with the
 faceplate's keys and knobs.  In the emulator it plays the test file's
 two tones out of the speaker at the right pitch on the right sides
-and the volume knob moves the amplifier (`sdk/tests/emulated.rs`,
+and the volume knob moves the amplifier (`tests/emulated.rs`,
 `sdk_player_plays_an_mp3`).  Standard cards only.
 
 On a unit (the North American 192, the player from a 32 MB card, a
@@ -298,14 +298,14 @@ card processor waited for one of its own to be taken, and with the
 driver stuck nobody answered the faceplate controller, which has the
 light.  The stock driver takes the processor's words in an interrupt.
 The SDK's now takes what is there to read whenever it waits to write
-(`put` in `sdk/src/sd.c`), and that was all it wanted.
+(`put` in `src/sd.c`), and that was all it wanted.
 
 The tuner is the radio processor's too: `radio_tune` sends it to a
-frequency, and `sdk/examples/tuner` is a radio made of that, the
+frequency, and `examples/tuner` is a radio made of that, the
 source and the volume.  On the unit it is heard, and tunes: the radio
 processor acknowledges each frequency.
 
-`sdk/examples/timing` is a row of measurements made to come from a
+`examples/timing` is a row of measurements made to come from a
 card: the display's vertical syncs, what a sector from each card takes,
 and the time of an access to each part of the bus.  No hands wanted; it
 restarts the unit when it is done.
@@ -336,8 +336,8 @@ drive:
 * `firmware_remove()` and `restart()`: the program erases the 8 KiB
   sector with the directory of the installed software, and the ROM,
   finding no software, reads the loader from the disc and runs it.
-  `sdk/examples/installed` does it when RETURN is held.
-* The guard (`sdk/src/flash.c`, called by the start-up code before
+  `examples/installed` does it when RETURN is held.
+* The guard (`src/flash.c`, called by the start-up code before
   `main`).  A program in flash counts its starts in the battery-backed
   memory (at 0x3ff00, above all the stock software uses) and sets the
   count back when it calls `firmware_healthy()`.  The fifth start in a
@@ -360,12 +360,12 @@ disc still in the drive would get the program back at once, and a
 program that does not work would never let the disc go, since nothing
 but the program could push it out.  So `rnse firmware --swap swap.bin`
 puts a program of the SDK in the file's place and leaves the stock
-loader in the container: `sdk/examples/swap` pushes the disc out, says
+loader in the container: `examples/swap` pushes the disc out, says
 what to put in, and restarts the unit when a disc has gone in and is
 ready.  Always make a firmware disc with it.
 
 In the emulator, under a unit's boot ROM and with arbitrary RAM and the
-caches modelled, all of it runs (`sdk/tests/emulated.rs`,
+caches modelled, all of it runs (`tests/emulated.rs`,
 `a_program_is_installed_in_flash_and_taken_out_again`,
 `a_firmware_disc_left_in_the_drive_does_not_install_again` and
 `a_program_in_flash_that_never_gets_going_takes_itself_out`): the
@@ -375,7 +375,7 @@ key, and the guard; afterwards the flash holds the stock software byte
 for byte and it starts.
 
 **On a unit** (the North American 192, software 0371) the circle has
-been walked once, with `sdk/examples/installed`:
+been walked once, with `examples/installed`:
 
 * The stock software took the firmware disc for an update and its
   loader installed it; 150 s after the software's start the unit was
@@ -398,12 +398,12 @@ What has still not happened on a unit: the guard's count running
 to five, and the swap loader, since the disc was out when the program
 went.  (A program from flash finds the radio processor and the card
 processors as the boot ROM leaves them and not as the stock software
-does; `sdk/examples/base`, below, has used both so.)
+does; `examples/base`, below, has used both so.)
 
 This is still the one part of the SDK that can leave a unit without
 software: keep a stock update disc with the unit.
 
-`sdk/examples/base` is a firmware of that kind with something to do: a
+`examples/base` is a firmware of that kind with something to do: a
 radio and an MP3 player, with the way out.  It brings up what the stock
 software would have, since from flash nothing has: `radio_start` sets
 the line to the radio processor and sends the frames the stock software
@@ -444,11 +444,11 @@ software may not do) and what `8a` is for are not known.
 
 You need an SH-4 GCC that can produce big-endian code without its
 libraries; Debian's and Ubuntu's `gcc-sh4-linux-gnu` will do.  Where
-there is none to install (macOS), `sdk/tools/sh4-docker` runs that one in a
-container: `PATH=$PWD/sdk/tools/sh4-docker:$PATH sdk/build.sh 192`.
+there is none to install (macOS), `tools/sh4-docker` runs that one in a
+container: `PATH=$PWD/tools/sh4-docker:$PATH ./build.sh 192`.
 
-    sdk/build.sh 193                 # or 192; writes sdk/out/hello-193.bin
-    rnse custom disc.iso V574 sdk/out/hello-193.bin hello.iso
+    ./build.sh 193                 # or 192; writes out/hello-193.bin
+    rnse custom disc.iso V574 out/hello-193.bin hello.iso
     rnse loader hello.iso --variant V574 --strict --screenshot hello.png
 
 `rnse custom` takes an image of an update disc you own and writes a
@@ -476,7 +476,7 @@ header names the project the boot ROM expects.
 running:
 
     rnse loader keys.iso --variant V574 --gdb 3333 &
-    gdb-multiarch sdk/out/keys-193.elf -ex 'target remote :3333'
+    gdb-multiarch out/keys-193.elf -ex 'target remote :3333'
     (gdb) break panel_poll
     (gdb) continue
     (gdb) bt
@@ -495,7 +495,7 @@ no watchpoints yet (GDB then steps instead, slowly).
 
 ## What a program gets
 
-`sdk/include/rnse.h`.  In short: `board_init()` brings the board up and
+`include/rnse.h`.  In short: `board_init()` brings the board up and
 starts a 10 ms tick; then there is a clock (`millis`, `delay_ms`), text
 on the debug serial port, and a picture of 8 bits per pixel through a
 palette (`screen_pixel`, `screen_fill`, `screen_text`, `screen_blit` for
@@ -516,21 +516,21 @@ at once.  `panel_service()` is what every program owes the keys
 wherever it waits: the faceplate answered, the display key followed
 and CD EJECT obeyed (`cd_eject`), so that the disc and the cards can
 always be got at; set `sd_idle` and `display_idle` to it as well.
-`sdk/examples/display` shows the position and moves the display (the
+`examples/display` shows the position and moves the display (the
 key, NEXT, PREV, SELECT to stop; RETURN held for two seconds back to
-the SD loader); `sdk/examples/sdboot` and `sdk/examples/base` follow
+the SD loader); `examples/sdboot` and `examples/base` follow
 both keys.  Seven examples
-(`sdk/examples/report` and `sdk/examples/drive` have sections of their
+(`examples/report` and `examples/drive` have sections of their
 own below):
-`sdk/examples/probe` is the one for a first try on a unit (see "The way
-back"); `sdk/examples/hello` draws a test picture and counts seconds;
-`sdk/examples/keys` shows what the faceplate reports (`sdk/build.sh 193
+`examples/probe` is the one for a first try on a unit (see "The way
+back"); `examples/hello` draws a test picture and counts seconds;
+`examples/keys` shows what the faceplate reports (`./build.sh 193
 keys`, and `--key SETUP@1500 --knob 1:3@2500` on the `rnse loader`
-command line to press and turn); `sdk/examples/cd` reads the disc the
-program came on; `sdk/examples/beacon` is the
+command line to press and turn); `examples/cd` reads the disc the
+program came on; `examples/beacon` is the
 probe that says on the CAN bus how far it has got, for a logic
 analyser on the two wires and no other node ("On a real unit");
-`sdk/examples/can` lists the frames on the bus and
+`examples/can` lists the frames on the bus and
 sends the one with which the stock software reports itself (`--can
 351:4500000000000000@300` on the command line puts a frame on the
 emulated bus every 300 ms, `--can-alone` takes every other node away).
@@ -559,25 +559,25 @@ Samples of a program's own go out of a processor's converter with
 `pcm_start` and `pcm_put` or `pcm_dma`, and without gaps with
 `pcm_stream`, a ring of blocks the DMA controller plays one after the
 other, each started from the last one's interrupt (Doom's sound,
-[doom.md](../ports/docs/doom.md)), or as a sound card would, with `pcm_loop`: the
+[doom.md](https://github.com/jroark/rnse-ports/blob/main/docs/doom.md)), or as a sound card would, with `pcm_loop`: the
 ring played round and round with no block to wait for, and
 `pcm_loop_pos` where the controller is in it (Quake's sound,
-[quake.md](../ports/docs/quake.md)).
+[quake.md](https://github.com/jroark/rnse-ports/blob/main/docs/quake.md)).
 
 A program bigger than the loader's place is loaded by one in it and
-entered with `image_enter` (`sdk/src/enter.c`: everything stopped, the
+entered with `image_enter` (`src/enter.c`: everything stopped, the
 caches seen to); it goes back to the SD loader through the first one's
 `loader_return`, which it sets as `loader_return_via`
-(`sdk/src/wayback.c`).  `linuxboot` does the first half for Linux,
+(`src/wayback.c`).  `linuxboot` does the first half for Linux,
 `doomboot` both for Doom, `quakeboot` both for Quake.
 
 There is no C library.  What the compiler calls on its own is in
-`sdk/src/libgcc.S` (division, and the block copy it uses for large
+`src/libgcc.S` (division, and the block copy it uses for large
 structures; the SH-4 cross compilers that are easy to get are
 little-endian, so their libgcc cannot be linked), so `/` and `%` work;
 `udiv` and `umod` are still there.  `memset` and `memcpy` move a long
 word at a time where they can.  `malloc` hands out pieces of a block of
-RAM the program gives to `heap_init` (`sdk/src/heap.c`) and `free` gives
+RAM the program gives to `heap_init` (`src/heap.c`) and `free` gives
 nothing back.  Floating point is switched off (`-m4-nofpu`).
 
 An example may build some of its files otherwise: a file `flags` beside
@@ -593,31 +593,31 @@ on the kit's own surface, and `pcm_dma` takes samples through P2
 (uncached), which it then need not write back: that is how
 `ports/dvd/dvd` feeds one transfer of 47 s that it writes ahead of.
 
-Code from elsewhere goes in `sdk/third_party/NAME/`, with its licence;
+Code from elsewhere goes in `third_party/NAME/`, with its licence;
 an example that uses it names it in a file `libs` beside its sources,
 and `build.sh` compiles every `.c` of it with `-O2` and the few C
-library headers in `sdk/third_party/libc`.  So far there is one,
+library headers in `third_party/libc`.  So far there is one,
 `h264bsd`, an H.264 decoder (see `sdbridge/docs/android-auto.md`).
 
 A program that computes much should set the caches up for itself:
 the stock setting the program finds (CCR 0x80008181) writes every store
 through P1, where the program, its data and its stack are, straight to
 memory, and gives code and data within one 32 MB half of each cache.
-`cache_setup(CCR_EMODE | CCR_ICE | CCR_OCE | CCR_CB)` (`sdk/src/cache.S`)
+`cache_setup(CCR_EMODE | CCR_ICE | CCR_OCE | CCR_CB)` (`src/cache.S`)
 writes the operand cache back and changes that safely; on the 192 it
-made the H.264 decoder of `sdk/examples/h264bench` two to three times
+made the H.264 decoder of `examples/h264bench` two to three times
 as fast (`sdbridge/docs/android-auto.md`).  With P1 copy-back, data the program
 hands to a device by DMA has to be written back first (`ocbwb`), as it
 already must through P0.
 
 `rnse boot ... --profile FILE` samples where the CPU is every 20,000
-cycles; `tools/profile.py sdk/out/NAME-192.elf FILE` adds the samples up
+cycles; `tools/profile.py out/NAME-192.elf FILE` adds the samples up
 by function.  It counts instructions, as the emulator does, not time on
 a unit.
 
 ## A report from a unit, and its boot ROM
 
-`sdk/examples/report` is the probe with a purpose: before it sets
+`examples/report` is the probe with a purpose: before it sets
 anything up it reads the processor's own registers as the installed
 software and the boot ROM have left them (identification, clock
 ratios, bus set-up, timers, interrupt priorities, serial port
@@ -651,8 +651,8 @@ the same procedure apply: build it, put it on a copy of the unit's
 update disc with a higher index, and the unit updates itself from that
 disc afterwards.
 
-    sdk/build.sh 192 report
-    rnse custom disc.iso V220 sdk/out/report-192.bin report.iso --index 0660
+    ./build.sh 192 report
+    rnse custom disc.iso V220 out/report-192.bin report.iso --index 0660
     candump -L can0 > log.txt          # on the bench, while it runs
     rnse report log.txt --rom bootrom-192.bin
 
@@ -661,7 +661,7 @@ disc afterwards.
 The two signal processors behind the SD slots (NEC µPD77115A,
 `docs/hardware.md`, "SD card processors") do nothing until a program
 is loaded into them.  The report loads one of its own into each, some
-thirty instructions written out in `sdk/examples/report/dsp.c` (the
+thirty instructions written out in `examples/report/dsp.c` (the
 stock software's program is not used and not needed), which
 
 * sends the levels on the processor's eight port pins.  After a reset
@@ -693,7 +693,7 @@ emulator has them.
 
 ### The drive's log
 
-`sdk/examples/drive` is a third program for a real unit, about one
+`examples/drive` is a third program for a real unit, about one
 question: what the drive answers while a disc goes in.  The stock
 software takes a disc that is put in while it runs for an update only
 if the drive answers in a particular way while it loads the disc.  The
@@ -716,8 +716,8 @@ to the stock loader; without a key it does so after ten minutes
 the CAN bus (identifier 0x7F5: line number, time in three bytes, the
 three numbers, and 0 for an error, 1 for ready, 2 for no answer).
 
-    sdk/build.sh 192 drive
-    rnse custom disc.iso V220 sdk/out/drive-192.bin drive.iso --index 0660
+    ./build.sh 192 drive
+    rnse custom disc.iso V220 out/drive-192.bin drive.iso --index 0660
     rnse loader drive.iso --variant V220 --key CD_EJECT@3000 --disc-back 6000 \
         --key SETUP@16000 --cycles 5000000000        # what the emulator answers
 
@@ -730,7 +730,7 @@ how long, and whether `6/28/00` comes before that or after.
 
 ### Many questions in one run
 
-`sdk/examples/suite` is for a unit on a bench with a logic analyser on
+`examples/suite` is for a unit on a bench with a logic analyser on
 its CAN wires: ten measurements one after the other, every answer a
 record on the bus (frames 0x7F8, sent to nobody like the report's), on
 the screen and on the debug serial port.  The processor's speed with
@@ -745,7 +745,7 @@ its ends read; it stays open for the disc change, whose CD EJECT is
 behind it, and closes after), and at the end the watchdog: the
 strobe stops and records follow every 10 ms until the unit is reset,
 which is how long the watchdog waits.  It writes nothing anywhere and ends in a restart, so the disc
-can be used again.  `sdk/tests/emulated.rs` runs it against the emulator's own
+can be used again.  `tests/emulated.rs` runs it against the emulator's own
 models; the header of `main.c` has the records.
 
 ### What it would settle
@@ -764,7 +764,7 @@ runs in the emulator (`docs/boot-rom.md`, "The real one, in the
 emulator").
 
 In the emulator the program reads back the emulator's own stand-ins
-(`sdk/tests/emulated.rs`, `report_program_sends_the_boot_rom`), which proves
+(`tests/emulated.rs`, `report_program_sends_the_boot_rom`), which proves
 the plumbing and nothing about a unit.  The registers of the 192's
 list are in the SH7750R's manual and reading them does nothing; that
 the processor in the package is one where that holds is likely and
@@ -773,7 +773,7 @@ not certain.
 ## How the hardware layers were written
 
 For neither unit is there a board schematic, and for the 193's chip no
-public manual.  `sdk/src/hw192.c` and `hw193.c` therefore do what the
+public manual.  `src/hw192.c` and `hw193.c` therefore do what the
 stock loader does: every register they write is one the stock loader
 writes, with the same value, in the same order, as recorded from the
 loader running in the emulator.  Writes whose purpose is unknown are
@@ -926,7 +926,7 @@ happened, in order, because the failures say more than the success:
    and leaving the rest, the loader that the program starts does the
    whole update, in the 148 s it also takes when the stock software
    starts it.
-4. **What works now** (`sdk/examples/beacon`, the SDK as it is): the
+4. **What works now** (`examples/beacon`, the SDK as it is): the
    stock software starts the program; the picture matches the emulator's
    as far as a photograph shows; the tick is right (CAN
    frames a hundred ticks apart were 1.00003 s apart); the faceplate
@@ -955,7 +955,7 @@ Things that were wrong in what had been assumed, besides the latch:
   it is making is over.  `can_send` now waits for that, and the
   report's stream, sent to nobody at 3 ms a frame, arrived whole.
 
-5. **The report** (`sdk/examples/report`, three rounds of pages).  It
+5. **The report** (`examples/report`, three rounds of pages).  It
    ran through, card processors included, and handed over; the update
    followed.  Nobody acknowledged, so it sent each frame for 3 ms and
    went on (`can_send_for`); a logic analyser on the bus had 6.8 rounds
@@ -980,7 +980,7 @@ Things that were wrong in what had been assumed, besides the latch:
    card processors' clock control register (0x0100 after a reset) and
    the idle levels of the port pins to get there.
 
-6. **The drive's log, ending in a restart** (`sdk/examples/drive`
+6. **The drive's log, ending in a restart** (`examples/drive`
    built with `-DRESTART`).  The keys answer (CD EJECT, RETURN), the
    drive takes commands from a program and its answers are logged
    (`docs/boot-rom.md`, "A disc that goes in while the unit runs", has
@@ -1000,7 +1000,7 @@ Things that were wrong in what had been assumed, besides the latch:
    works from a program: sent by a key of the drive's log, it had the
    drive ready 5.65 s later.
 
-8. **The suite** (`sdk/examples/suite`): ten measurements in 39 s, all
+8. **The suite** (`examples/suite`): ten measurements in 39 s, all
    of them answered, 123 records on the bus.  What the emulator took
    from it: the watchdog waits 105 to 115 ms, not 1.5 s; the drive
    calls itself `ALPINE  DV33M01B/`, reads 256 sectors in a row in
@@ -1041,7 +1041,7 @@ Not tried on the unit: receiving on CAN.
 
 ## What this does and does not establish
 
-Established, by the tests in `sdk/tests/emulated.rs`: the examples build and
+Established, by the tests in `tests/emulated.rs`: the examples build and
 behave as written on both emulated units; and the stock software of
 both units, European and North American, running in the emulator,
 takes a disc made by `rnse custom` with a higher index for an update,
@@ -1107,9 +1107,9 @@ Not established:
 
 If you do try it on a unit, try the probe first:
 
-    sdk/build.sh 192 probe              # or 193
+    ./build.sh 192 probe              # or 193
     rnse info disc.iso                  # the disc's index for your variant
-    rnse custom disc.iso V220 sdk/out/probe-192.bin probe.iso --index 0660
+    rnse custom disc.iso V220 out/probe-192.bin probe.iso --index 0660
     rnse boot probe.iso --variant V220 --ignition --installed-index 0650 \
         --cpu-ratio 5 --cycles 30000000000 --shot 30000:probe.png   # the whole circle, emulated
 
@@ -1130,7 +1130,7 @@ the disc's index.  Other outcomes:
   can fail by itself there, about one time in six by the emulator's
   numbers, whatever the loader is: one of its own timer handlers runs
   into the loader's image ("Starting the loader" in
-  [boot-rom.md](boot-rom.md)).  What a unit does then is the boot
+  [boot-rom.md](https://github.com/jroark/rnse/blob/main/docs/boot-rom.md)).  What a unit does then is the boot
   ROM's business and not known; a restart and another try is the
   likely thing, and nothing has been written anywhere by then;
 * nothing, and the unit carries on as usual: it did not take the disc

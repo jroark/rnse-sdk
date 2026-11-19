@@ -226,7 +226,7 @@ int sd_busy(void);
  * processor of a slot whose card has gone, as the stock driver does. */
 int sd_restart(int slot);
 /* How a card's start is done, for trying other ways on a card that
- * will not start (sdk/examples/cardstart): the time between steps in
+ * will not start (examples/cardstart): the time between steps in
  * ms (150), the voltage window of ACMD41 (0x00ff0000), and, set, no
  * second ACMD41 without CMD55 while a card is busy. */
 extern u32 sd_pace, sd_window;
@@ -418,7 +418,7 @@ void restart(void);
  * src/wayback.c.  With sd_load, programs come from an SD card. */
 int run_image(void *image, u32 bytes);
 /* A bigger image than the loader's place holds, loaded into RAM by a
- * program in that place (sdk/src/enter.c; the 192): everything stopped,
+ * program in that place (src/enter.c; the 192): everything stopped,
  * the operand cache written back over [start, end), the instruction
  * cache invalidated, then a jump to entry.  Returns -1 on the 193. */
 int image_enter(u32 entry, u32 start, u32 end);
@@ -535,7 +535,7 @@ u32 umod(u32 a, u32 b);
 /* Memory to allocate from (src/heap.c): malloc() hands out pieces of
  * the block given to heap_init, aligned to 32 bytes, and free() does
  * nothing.  The kit itself allocates nothing; this is for the code in
- * sdk/third_party.  memset() and memcpy() are there as well. */
+ * third_party.  memset() and memcpy() are there as well. */
 void heap_init(void *base, u32 size);
 u32 heap_left(void);
 void *malloc(unsigned long n);

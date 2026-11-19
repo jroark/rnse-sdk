@@ -1081,7 +1081,7 @@ fn sdk_player_plays_an_mp3() {
 /// CMD55 to the card once it was ready, and sd.c now starts it again as the stock
 /// driver does: docs/hardware.md.)  The emulator's card answers either way, so
 /// what is checked is which way the loader took.  And RETURN held while
-/// the program reads its card without a pause (sdk/examples/cardloop,
+/// the program reads its card without a pause (examples/cardloop,
 /// as Quake reads) waits for the end of the read (sd_busy).
 #[test]
 fn sd_loader_reopens_its_card_after_a_return_or_a_swap() {

@@ -1,10 +1,10 @@
 #!/bin/sh
 # Run one tool of the SH-4 GCC in a container, in the current directory.
 # The three commands beside this file are links to it; put this
-# directory on the PATH and sdk/build.sh (and with it the SDK's tests)
+# directory on the PATH and ./build.sh (and with it the SDK's tests)
 # find a cross compiler:
 #
-#     PATH=$PWD/sdk/tools/sh4-docker:$PATH sdk/build.sh 192 hello
+#     PATH=$PWD/tools/sh4-docker:$PATH ./build.sh 192 hello
 #
 # The container sees the current directory and, for every absolute path
 # among the arguments (a source file, -I/dir, ...), the git working tree

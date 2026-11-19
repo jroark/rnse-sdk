@@ -1,0 +1,27 @@
+# The examples rnse-sdk keeps, and the units each builds for (verify.sh,
+# the CI).  modern is 192-only by design (build.sh refuses the 193).
+base 192 193
+beacon 192 193
+can 192 193
+cardloop 192
+cardstart 192
+cd 192 193
+display 192 193
+drive 192 193
+hello 192 193
+installed 192 193
+keys 192 193
+modern 192
+pcmtest 192 193
+player 192 193
+preflight 192 193
+probe 192 193
+report 192 193
+returnapi 192 193
+returntest 192 193
+returntest2 192 193
+sdboot 192 193
+suite 192 193
+swap 192 193
+timing 192 193
+tuner 192 193

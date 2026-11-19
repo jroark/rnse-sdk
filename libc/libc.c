@@ -1,5 +1,5 @@
 /* The C library of bare-metal programs on the RNS-E (Doom, umac): strings, numbers, memory, files.
- * (memset and memcpy are the SDK's, sdk/src/common.c; formatted output
+ * (memset and memcpy are the SDK's, src/common.c; formatted output
  * and input are in printf.c.) */
 #include <ctype.h>
 #include <errno.h>

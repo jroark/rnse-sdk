@@ -168,7 +168,7 @@ int cd_find(const char *name, u32 *sector, u32 *size)
 }
 
 /* The disc out: the drive allowed to let it go (the stock software
- * forbids removal) and told to eject, as sdk/examples/base does it.
+ * forbids removal) and told to eject, as examples/base does it.
  * The drive's port is set up first if cd_init has not done so. */
 
 int cd_eject(void)

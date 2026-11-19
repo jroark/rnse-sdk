@@ -2,7 +2,7 @@
 # The persistent SD test loader on a copy of a stock V222 disc
 # (docs/sd-loader.md):
 #
-#     PATH=sdk/tools/sh4-docker:$PATH sh sdk/tools/build-sd-loader.sh stock.iso [index]
+#     PATH=tools/sh4-docker:$PATH sh tools/build-sd-loader.sh stock.iso [index]
 #
 # Writes out/sd-loader/ in the SDK's directory.  The emulator's `rnse`
 # packs the disc: $RNSE, the rnse repository's own build or one on the

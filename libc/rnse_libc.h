@@ -1,4 +1,4 @@
-/* What the C library of sdk/libc wants of the program it is linked
+/* What the C library of libc wants of the program it is linked
  * into, and what it offers beyond the standard.  A bare-metal program
  * that uses it (doom/, umac/, quake/) defines port_idle and port_exit. */
 #ifndef RNSE_LIBC_H

@@ -1,4 +1,4 @@
-/* The C library of Doom (and umac) on the RNS-E (sdk/libc): what they
+/* The C library of Doom (and umac) on the RNS-E (libc): what they
  * use and no more.  Output goes to the SDK's debug serial port (the
  * emulator prints it); stderr is kept as well, for the screen that an
  * error ends on.  Files are the WAD in RAM (read only) and a few more

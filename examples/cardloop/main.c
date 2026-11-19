@@ -4,7 +4,7 @@
  * waits (sd_idle), that is in the middle of a read, and the driver puts
  * the return off until the read is over (sd_busy): the loader finds the
  * card processor between two messages and reads on with it as it is.
- * sdk/tests/emulated.rs, sd_loader_reopens_its_card_after_a_return_or_a_swap. */
+ * tests/emulated.rs, sd_loader_reopens_its_card_after_a_return_or_a_swap. */
 #include "rnse.h"
 
 int main(void)

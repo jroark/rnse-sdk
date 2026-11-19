@@ -15,7 +15,7 @@
  * 350 ms (closed) after the reading had settled; a reading within
  * STILL of where it was STALL_MS ago counts as settled.  LIMIT_MS is a
  * last resort, well beyond the sweep (1.5 s in the emulator; not yet
- * measured on a unit: sdk/examples/suite, test 19, does). */
+ * measured on a unit: examples/suite, test 19, does). */
 #include "rnse.h"
 
 #define OPEN_MAX 94    /* the stock software: at most 94 is fully open */

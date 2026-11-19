@@ -1,1 +1,36 @@
 out/
+
+/target
+# Firmware and anything derived from it stays out of the repository.
+/firmware/
+*.iso
+*.bin
+*.BIN
+*.KWI
+*.MOT
+*.bz2*
+*.zip
+*.img
+__pycache__/
+
+*.wad
+*.WAD
+*.ROM
+*.rom
+*.dsk
+*.DSK
+*.IMG
+*.pak
+*.PAK
+*.UF2
+# Keys and certificates stay out of the repository.
+*.pem
+*.key
+*.crt
+*.der
+
+# Logic analyser captures: a capture of the report example holds the boot ROM
+*.sal
+# Firmware and anything derived from it stays out of the repository.
+*.RNA
+# Keys and certificates stay out of the repository.

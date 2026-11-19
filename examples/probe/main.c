@@ -5,7 +5,7 @@
  * has to work for that but the processor and its memory: no key, no
  * drive command of this program's, no picture.
  *
- * WAIT seconds are shown (EXTRA_CFLAGS=-DWAIT=10 sdk/build.sh ... for
+ * WAIT seconds are shown (EXTRA_CFLAGS=-DWAIT=10 ./build.sh ... for
  * another number).  With -DRESTART it restarts the unit at the end
  * instead, which changes nothing in it. */
 #include "rnse.h"

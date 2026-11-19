@@ -1,0 +1,27 @@
+# Builds every example for both units with Debian's SH-4 GCC, runs the
+# host tests, and compiles the emulator tests.  The end-to-end tests
+# (tests/emulated.rs) need a firmware disc, which is never stored here
+# or in CI: they report success without one, so this run proves the
+# programs build, not that they work.
+name: build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: SH-4 cross compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-sh4-linux-gnu binutils-sh4-linux-gnu
+      - name: Examples
+        run: sh tools/build-all.sh
+      - name: Host tests
+        run: sh tests/check-modern.sh
+      - name: Emulator tests (skip without a disc)
+        run: cargo test --release

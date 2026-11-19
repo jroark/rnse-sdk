@@ -156,7 +156,7 @@ void screen_blit(int x, int y, int w, int h, const u8 *pixels, int pitch)
  * bit 3 runs the motor towards open, bit 4 towards closed, bit 2 is
  * low only when the display is fully open.  The stock software sets
  * bit 3 or bit 4, never both, and clears them to stop.  Its position is
- * A/D input 3, of the converter that sdk/examples/suite reads. */
+ * A/D input 3, of the converter that examples/suite reads. */
 #define PORT3 0xb2600000
 #define ADC 0xa7d00000
 

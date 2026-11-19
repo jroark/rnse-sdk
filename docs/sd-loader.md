@@ -9,11 +9,11 @@ The stock firmware is involved only in the initial disc launch.
 Build from the isolated worktree:
 
 ```sh
-PATH="$PWD/sdk/tools/sh4-docker:$PATH" sh sdk/tools/build-sd-loader.sh /path/to/stock.iso 0380
+PATH="$PWD/tools/sh4-docker:$PATH" sh tools/build-sd-loader.sh /path/to/stock.iso 0380
 ```
 
 Use a disc index higher than the installed index. Output is
-`sdk/out/sd-loader/sdboot.iso`, sample `RNSE.BIN`, `disc-info.txt`, and
+`out/sd-loader/sdboot.iso`, sample `RNSE.BIN`, `disc-info.txt`, and
 `SHA256SUMS`. Burn the ISO as a disc image. Only the V222 loader is replaced;
 this is not a 193 loader. The sample completes with status 17.
 
@@ -21,8 +21,8 @@ Build tests with this worktree's SDK and copy the resulting binary to the
 card as `RNSE.BIN`:
 
 ```sh
-PATH="$PWD/sdk/tools/sh4-docker:$PATH" sdk/build.sh 192 returntest
-cp sdk/out/returntest-192.bin /Volumes/YOUR_CARD/RNSE.BIN
+PATH="$PWD/tools/sh4-docker:$PATH" ./build.sh 192 returntest
+cp out/returntest-192.bin /Volumes/YOUR_CARD/RNSE.BIN
 ```
 
 Return normally from `main()` or call `loader_return(status)` explicitly.
@@ -37,14 +37,14 @@ Every file `NAME.BIN` in the card's top directory that could be a
 program is one (up to nine): names starting with `_`, the Mac's `._`
 files, are left out, and so is any `.BIN` larger than a program can be
 (0x1c000 bytes), such as the Linux kernel `VMLINUX.BIN` that
-`linuxboot` reads ([linux.md](../linux/docs/linux.md)).
+`linuxboot` reads ([linux.md](https://github.com/jroark/rnse-linux/blob/main/docs/linux.md)).
 With one on the card, it runs when the card goes in, as before.  With
 several, the loader shows a menu: the select knob, NEXT and PREV
 choose, SELECT runs.  When the program returns, the menu comes back
 with it chosen, and RETURN runs it again.  Taking the card out and
 putting it back starts over.  The name of the program run last is
 kept with the session's control data (`loader_note`, `loader_noted`
-in `sdk/src/wayback.c`), since the loader is started afresh after
+in `src/wayback.c`), since the loader is started afresh after
 every return.
 
 **No new disc is needed for this.**  A loader on the card as `RNSE.BIN`
@@ -57,15 +57,15 @@ loader, menu and all.  So: the new `sdboot-192.bin` on the card as
 `RNSE.BIN`, the tests under other names:
 
 ```sh
-PATH="$PWD/sdk/tools/sh4-docker:$PATH" sdk/build.sh 192 sdboot
-cp sdk/out/sdboot-192.bin /Volumes/YOUR_CARD/RNSE.BIN
-PATH="$PWD/sdk/tools/sh4-docker:$PATH" sdk/build.sh 192 returntest
-PATH="$PWD/sdk/tools/sh4-docker:$PATH" sdk/build.sh 192 returntest2
-cp sdk/out/returntest-192.bin /Volumes/YOUR_CARD/TEST17.BIN
-cp sdk/out/returntest2-192.bin /Volumes/YOUR_CARD/SECOND.BIN
+PATH="$PWD/tools/sh4-docker:$PATH" ./build.sh 192 sdboot
+cp out/sdboot-192.bin /Volumes/YOUR_CARD/RNSE.BIN
+PATH="$PWD/tools/sh4-docker:$PATH" ./build.sh 192 returntest
+PATH="$PWD/tools/sh4-docker:$PATH" ./build.sh 192 returntest2
+cp out/returntest-192.bin /Volumes/YOUR_CARD/TEST17.BIN
+cp out/returntest2-192.bin /Volumes/YOUR_CARD/SECOND.BIN
 ```
 
-`sdk/tests/emulated.rs`, `sd_loader_offers_a_menu_of_programs`, checks the menu,
+`tests/emulated.rs`, `sd_loader_offers_a_menu_of_programs`, checks the menu,
 the return to it, RETURN, and a loader chosen from the menu taking over.
 
 At the loader, a card already present runs once. Otherwise insert a card;
@@ -84,7 +84,7 @@ changing files on a computer, then reinsert it.
 
 `ports/dvd/dvd` is one such program, a DVD player: `DVD.BIN` on the
 card, and the loader's disc taken out for a DVD once it runs
-([dvd.md](../ports/docs/dvd.md)).
+([dvd.md](https://github.com/jroark/rnse-ports/blob/main/docs/dvd.md)).
 
 ## RAM and return contract
 
@@ -98,7 +98,7 @@ status without going through the ROM reset entry.
 
 A program goes back to the loader only between two exchanges with a
 card processor: RETURN held during a read takes effect at the read's
-end (`sd_busy` in `sdk/src/sd.c`, `follow_return` in `sdk/src/cd.c`).
+end (`sd_busy` in `src/sd.c`, `follow_return` in `src/cd.c`).
 The loader then takes the card as the program left it (`sd_attach`);
 a card that has gone in since is started the stock driver's way, on
 the processor's program without a reset (`sd_restart`), and only when
@@ -116,7 +116,7 @@ respect this memory. Arbitrary hangs or memory corruption require a reset.
 ## Verification
 
 ```sh
-PATH="$PWD/sdk/tools/sh4-docker:$PATH" RNSE_DISC=/path/to/stock.iso \
+PATH="$PWD/tools/sh4-docker:$PATH" RNSE_DISC=/path/to/stock.iso \
   cargo test --release -p rnse-sdk --test emulated sd_loader_returns_and_rearms_on_reinsertion -- --nocapture
 cargo test --release --lib
 ```
@@ -128,8 +128,8 @@ returns status 23. A second visible test, `returntest2`, displays
 "SECOND SD TEST" for five seconds before returning status 23:
 
 ```sh
-PATH="$PWD/sdk/tools/sh4-docker:$PATH" sdk/build.sh 192 returntest2
-cp sdk/out/returntest2-192.bin /Volumes/YOUR_CARD/RNSE.BIN
+PATH="$PWD/tools/sh4-docker:$PATH" ./build.sh 192 returntest2
+cp out/returntest2-192.bin /Volumes/YOUR_CARD/RNSE.BIN
 ```
 
 The `second_sd_test_returns_status_23` integration test verifies that payload

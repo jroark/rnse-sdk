@@ -2,7 +2,7 @@
  * card about the things it will rely on there.  The 192.
  *
  *   1  The guard's memory.  A program in flash counts its starts in
- *      the battery-backed memory at 0x3ff00 (sdk/src/flash.c).  This
+ *      the battery-backed memory at 0x3ff00 (src/flash.c).  This
  *      writes a count of its own next to it (0x3ff10) and reads it
  *      back, at every run one more: "RUN n" has to go up by one each
  *      time, through a restart and through the power being off.  It

@@ -49,7 +49,7 @@
 #endif
 #define WAIT (DARK + LIT)
 
-/* The 192's CAN controller (sdk/src/hw192.c). */
+/* The 192's CAN controller (src/hw192.c). */
 #define CAN 0xa7c00000
 #define CAN_MB1 (CAN + 0x120)
 #define PORT_A 0xb2a00001

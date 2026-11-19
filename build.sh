@@ -1,12 +1,12 @@
 #!/bin/sh
-# Build an example for one unit:   sdk/build.sh 192|193 [example]
+# Build an example for one unit:   ./build.sh 192|193 [example]
 # The result, out/<example>-<unit>.bin, is the image from the module's
 # entry points on; `rnse custom` puts it on a copy of an update disc.
 # Needs sh4-linux-gnu-gcc (any SH-4 GCC will do, set CROSS).
 #
 # The example is the name of a directory of examples/ or, given with a
 # slash in it, the path of a directory anywhere else (a program kept in
-# a repository of its own: sdk/build.sh 192 ../doom/boot).  Its output
+# a repository of its own: ./build.sh 192 ../doom/boot).  Its output
 # is named after the directory's last component either way.
 set -e
 unit=${1:?unit: 192 or 193}

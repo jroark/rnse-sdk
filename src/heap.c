@@ -1,4 +1,4 @@
-/* malloc() and free() for code that wants them (sdk/third_party): a
+/* malloc() and free() for code that wants them (third_party): a
  * bump allocator over a block of RAM the program hands to heap_init.
  * free() gives nothing back; a program that is done with everything
  * calls heap_init again.  Blocks are aligned to 32 bytes, the SH-4's

@@ -97,7 +97,7 @@ static int finish(int r)
  * stock driver's) and whether ACMD41 is asked a second time without
  * CMD55 while a card that answered CMD8 is busy (the stock driver
  * does): for trying other ways on a card that does not start
- * (sdk/examples/cardstart). */
+ * (examples/cardstart). */
 u32 sd_pace = 150, sd_window = 0x00ff0000;
 int sd_no_second_acmd41;
 int sd_unstick, sd_long_cmd55;
