@@ -3,7 +3,7 @@
 Changes to what other repositories depend on (CLAUDE.md, "Interfaces
 other repositories depend on"); releases are tagged.
 
-## Unreleased
+## v0.2.0
 
 Additions only: nothing that builds today changes.
 
