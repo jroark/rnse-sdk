@@ -704,6 +704,20 @@ fn until(m: &mut Machine, from: usize, what: &str, seconds: u64) -> Option<usize
     None
 }
 
+/// As `until`, in steps of 100 ms: for a test that must act soon after
+/// the text appears (a program's own timer already running), not up to
+/// five seconds later.
+fn until_soon(m: &mut Machine, from: usize, what: &str, seconds: u64) -> Option<usize> {
+    let ms = m.cycles_per_ms();
+    for _ in 0..seconds * 10 {
+        assert_eq!(m.run(100 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+        if let Some(at) = m.console.get(from..).and_then(|t| String::from_utf8_lossy(t).find(what)) {
+            return Some(from + at);
+        }
+    }
+    None
+}
+
 fn stock_is_in_flash(m: &Machine, image: &[u8]) {
     use rnse::board::Model;
     let variants = fw::load_variants(image).unwrap();
@@ -1356,9 +1370,13 @@ fn return_held_goes_back_to_the_loader_and_from_there_to_stock() {
     let card = rnse::fat::card("HOLD", &[rnse::fat::Entry::file("SECOND.BIN", second)], None).unwrap();
     let at = m.console.len();
     assert!(m.insert_card(0, rnse::dev::sdhi::Card::from_bytes(card).unwrap()));
-    let started = until(&mut m, at, "rnse sdk: returntest2", 30).unwrap_or_else(|| panic!("{}: {}", name, String::from_utf8_lossy(&m.console[at..])));
+    // (Within 100 ms of its start: its five seconds are already running.)
+    let started = until_soon(&mut m, at, "rnse sdk: returntest2", 30).unwrap_or_else(|| panic!("{}: {}", name, String::from_utf8_lossy(&m.console[at..])));
     // Held within the program's five seconds: the loader again, before
-    // the program would have returned by itself (status 23).
+    // the program would have returned by itself (status 23).  Pressed
+    // once it has looked at the keys (a RETURN already down when a
+    // program starts counts only after it has been let go).
+    assert_eq!(m.run(300 * ms), Stop::Budget);
     assert!(m.panel_key("RETURN", true));
     assert_eq!(m.run(2600 * ms), Stop::Budget);
     let text = String::from_utf8_lossy(&m.console[started..]).into_owned();
@@ -1601,8 +1619,12 @@ fn modern_resident_shell() {
     assert!(radio.chunks(3).any(|p| p[0]>100&&p[1]<50));
     m.panel_knob("volume", 2); run(&mut m, 200);
     assert_eq!(m.radio.volume, 10);
-    press(&mut m, "MEDIA"); press(&mut m, "SOFT_BL"); run(&mut m, 8000);
-    assert!(String::from_utf8_lossy(&m.console).contains("modern: card ready"));
+    // The card started as the stock driver starts it (sd_init: a ready
+    // card's silence to CMD55, then a new start, a step every 150 ms):
+    // some 8 to 13 s here.
+    let at = m.console.len();
+    press(&mut m, "MEDIA"); press(&mut m, "SOFT_BL");
+    assert!(until_soon(&mut m, at, "modern: card ready", 20).is_some(), "{}", String::from_utf8_lossy(&m.console[at..]));
     shot(&mut m, "media");
     press(&mut m, "SELECT"); run(&mut m, 2000);
     assert!(m.board.media.dsps[0].loud_frames > 0);
