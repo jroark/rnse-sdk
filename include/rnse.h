@@ -82,6 +82,12 @@ int panel_pressed(int key);
 /* Detents turned since the last call: positive is clockwise for the
  * select knob and "louder" for the volume knob. */
 int panel_knob(int knob);
+/* Keys and detents from elsewhere (the steering wheel: car.c), seen by
+ * panel_key, panel_pressed and panel_knob as if from the faceplate.  A
+ * key put down stays down until it is put up again, whatever the
+ * faceplate reports meanwhile. */
+void panel_put_key(int key, int down);
+void panel_put_knob(int knob, int detents);
 
 enum {
     KEY_INFO = 1, KEY_NAV = 2, KEY_TEL = 3, KEY_NAME = 5, KEY_MEDIA = 6, KEY_RADIO = 7,
@@ -189,6 +195,9 @@ extern void (*loader_leave)(void);
 extern int panel_return_to_loader;
 int panel_return_short(void);
 int panel_return_held(void);
+/* Called at the end of panel_service when set: car_init sets it to
+ * car_poll, so that a program that serves its keys serves the car too. */
+extern void (*panel_service_hook)(void);
 /* Sectors of 2048 bytes. */
 int cd_read(u32 sector, u32 count, void *buf);
 /* A file in the root directory of an ISO 9660 disc, by its name in
@@ -387,6 +396,54 @@ int can_send_for(u16 id, const u8 *data, int len, u32 us);
  * data stored; -1 when there is none. */
 int can_receive(u16 *id, u8 *data);
 u32 can_lost(void);
+/* The controller's state: its general status register (GSR) in the
+ * upper half, the transmit error counter in bits 15..8 and the receive
+ * error counter in bits 7..0.  In GSR, as Renesas' HCAN2 has it, bit 0
+ * is bus off, bit 1 an error counter at 96 or more and bit 5 error-
+ * passive (a counter at 128 or more); a 192 alone on a bench, sending
+ * with nobody to acknowledge, reads 0x0026 with 0x88 transmit errors. */
+u32 can_status(void);
+
+/* The car, as the infotainment CAN bus tells it (src/car.c; what the
+ * frames mean is in docs/car-bus.md, with what was seen on a unit and
+ * what is only the emulator's).  car_init starts CAN and has
+ * panel_service call car_poll, which takes every frame from
+ * can_receive: those it knows it uses, the rest go to car_other when
+ * set.  A program that reads frames itself can hand them to car_frame
+ * instead (1: it was the car's).
+ *
+ * The steering wheel's keys (0x5C3, first byte 0x39) reach programs as
+ * the faceplate's: volume up and down as detents of KNOB_VOLUME (one a
+ * press, then five a second while held), seek up and down as KEY_NEXT
+ * and KEY_PREV, unless car_wheel_panel is cleared.  car_wheel says
+ * which code is held (0: none), car_wheel_next the codes pressed since
+ * the last call, one a call, for the keys that have no faceplate key
+ * yet.  A key whose frames stop is let go after half a second. */
+enum {
+    WHEEL_SEEK_UP = 0x04, WHEEL_SEEK_DOWN = 0x05,
+    WHEEL_VOLUME_UP = 0x06, WHEEL_VOLUME_DOWN = 0x07
+};
+void car_init(void);
+void car_poll(void);
+int car_frame(u16 id, const u8 *data, int len);
+extern void (*car_other)(u16 id, const u8 *data, int len);
+extern int car_wheel_panel;
+int car_wheel(void);
+int car_wheel_next(void);
+/* The ignition lock (0x271, or 0x2C3 in other cars): bit 0 the key in
+ * the lock, bit 1 the ignition on; -1 when neither has come for a
+ * second (the car sends it every 100 ms). */
+#define CAR_KEY_IN 1
+#define CAR_IGNITION 2
+int car_ignition(void);
+/* The radio's two lines of eight characters in the instrument
+ * cluster, sent once a second while the ignition message comes (so
+ * that a unit alone on a bench does not wait on frames nobody
+ * acknowledges); 0 to stop.  car_cluster_id is the first line's
+ * identifier, the second's is two higher: 0x363 as a unit coded for an
+ * A3 (8P) sends, 0x261 as the uncoded emulated unit does. */
+void car_cluster_text(const char *line1, const char *line2);
+extern u16 car_cluster_id;
 
 /* Between the hardware layer and the CAN code: can_take reads a frame
  * out of the receive mailbox (-1: none, -2: one or more were lost, call

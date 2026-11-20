@@ -34,3 +34,5 @@ __pycache__/
 # Firmware and anything derived from it stays out of the repository.
 *.RNA
 # Keys and certificates stay out of the repository.
+# Bench logs (tools/canbench.py)
+/work/
