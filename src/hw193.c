@@ -365,6 +365,11 @@ int can_send_for(u16 id, const u8 *data, int len, u32 us)
     return 0;
 }
 
+u32 can_status(void)
+{
+    return (u32)REG16(CAN + 0x02) << 16 | REG16(CAN + 0x0c);
+}
+
 int can_send(u16 id, const u8 *data, int len)
 {
     return can_send_for(id, data, len, 100000);

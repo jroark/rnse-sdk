@@ -19,6 +19,7 @@ static int rx_len;
 static u32 rx_time;
 static u8 keys[6];
 static u8 pressed[6]; /* went down since panel_pressed last said so */
+static u8 extra[6];   /* held by another source: the steering wheel (car.c) */
 static int knobs[2];
 static int started;       /* the controller has announced itself */
 static const u8 *setting; /* next frame of panel_settings to send */
@@ -182,7 +183,27 @@ int panel_key(int key)
 {
     if (key < 0 || key >= 48)
         return 0;
-    return keys[key >> 3] >> (key & 7) & 1;
+    return (keys[key >> 3] | extra[key >> 3]) >> (key & 7) & 1;
+}
+
+void panel_put_key(int key, int down)
+{
+    u8 m;
+    if (key < 0 || key >= 48)
+        return;
+    m = (u8)(1u << (key & 7));
+    if (down) {
+        if (!(extra[key >> 3] & m))
+            pressed[key >> 3] |= m;
+        extra[key >> 3] |= m;
+    } else {
+        extra[key >> 3] &= (u8)~m;
+    }
+}
+
+void panel_put_knob(int knob, int detents)
+{
+    knobs[knob & 1] += detents;
 }
 
 int panel_pressed(int key)

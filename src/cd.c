@@ -268,6 +268,8 @@ int panel_return_held(void)
 }
 
 /* What every program owes the keys (see rnse.h). */
+void (*panel_service_hook)(void);
+
 void panel_service(void)
 {
     panel_poll();
@@ -276,4 +278,6 @@ void panel_service(void)
     follow_return();
     /* (The radio processor's keep-alive, once a minute: radio.c.) */
     radio_keepalive();
+    if (panel_service_hook)
+        panel_service_hook();
 }

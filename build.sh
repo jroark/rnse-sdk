@@ -67,7 +67,7 @@ objs=""
 # generation, a line each: the file's name and the options that take
 # the place of -m4-nofpu -Os (-m4 for code that uses the
 # FPU, which the kit's own code leaves alone; -O2 for speed).
-for src in src/crt0.S src/common.c src/heap.c src/libgcc.S src/cache.S src/panel.c src/display.c src/cd.c src/can.c src/sd.c src/pcm.c src/radio.c src/flash.c src/wayback.c src/enter.c src/hw$unit.c "$dir"/*.c; do
+for src in src/crt0.S src/common.c src/heap.c src/libgcc.S src/cache.S src/panel.c src/display.c src/cd.c src/can.c src/car.c src/sd.c src/pcm.c src/radio.c src/flash.c src/wayback.c src/enter.c src/hw$unit.c "$dir"/*.c; do
     obj=$objdir/$(basename "$src" | sed 's/\.[cS]$/.o/')
     own=""
     case $src in

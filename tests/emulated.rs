@@ -1785,3 +1785,109 @@ fn modern_builtins() {
     assert_eq!(latest(&reboot),location);
     assert_eq!(m.resets,0);
 }
+
+/// The bench program for CAN with another node (examples/canbench):
+/// every frame that arrives is answered on 0x7f8 with its identifier,
+/// length and a hash of its data, in order; its state goes out once a
+/// second and a burst of sixteen frames on request, all of them sent.
+#[test]
+fn can_bench_answers_every_frame() {
+    use rnse::board::Model;
+    use rnse::dev::hcan::Frame;
+    let Some(image) = disc() else { return };
+    for model in [Model::Rnse192, Model::Rnse193] {
+        let Some((mut m, name, _)) = sdk_example(&image, model, "canbench") else { continue };
+        let ms = m.cycles_per_ms();
+        assert_eq!(m.run(300 * ms), Stop::Budget, "{}: {:?}", name, m.cpu.fault);
+        m.can().tx.clear();
+        let sent: Vec<Frame> = (0..8u8).map(|n| Frame::new(0x100 + n as u16 * 0x51, &[n, 0xa5, n ^ 0x3c, 7, 6, 5, 4, 3][..n as usize + 1])).collect();
+        for f in &sent {
+            m.can_frame(f.clone());
+        }
+        m.can_frame(Frame::new(0x7f7, &[1])); // a burst, now
+        assert_eq!(m.run(1_500 * ms), Stop::Budget, "{}: {:?}", name, m.cpu.fault);
+        let tx: Vec<Frame> = m.can().tx.iter().filter(|f| f.id == 0x7f8).cloned().collect();
+        let echoes: Vec<&Frame> = tx.iter().filter(|f| f.data[0] == b'R').collect();
+        assert_eq!(echoes.len(), sent.len() + 1, "{}: {:?}", name, tx);
+        for (i, (e, f)) in echoes.iter().zip(&sent).enumerate() {
+            let h = f.data[..f.len as usize].iter().fold(2166136261u32, |h, b| (h ^ *b as u32).wrapping_mul(16777619));
+            let want = [b'R', i as u8 + 1, (f.id >> 8) as u8, f.id as u8, f.len, (h >> 16) as u8, (h >> 8) as u8, h as u8];
+            assert_eq!(e.data, want, "{}: echo {}", name, i);
+        }
+        let burst: Vec<u8> = tx.iter().filter(|f| f.data[0] == b'B' && f.len == 3).map(|f| f.data[2]).collect();
+        assert_eq!(burst, (0..16).collect::<Vec<u8>>(), "{}", name);
+        let state = tx.iter().find(|f| f.data[0] == b'S').expect("a state frame");
+        assert_eq!(state.data[7], 0, "{}: no send failed: {:?}", name, state);
+        assert!(m.can().tx.iter().any(|f| f.id == 0x661), "{}", name);
+    }
+}
+
+/// The car driver (src/car.c, examples/car): the ignition lock, the
+/// steering wheel's keys as the faceplate's (volume knob, NEXT, PREV),
+/// a key let go when its frames stop, and the radio's lines in the
+/// cluster.  The program reports what it sees on 0x7f8.
+#[test]
+fn car_program_follows_the_ignition_and_the_steering_wheel() {
+    use rnse::board::Model;
+    use rnse::dev::hcan::Frame;
+    let Some(image) = disc() else { return };
+    for model in [Model::Rnse192, Model::Rnse193] {
+        let Some((mut m, name, _)) = sdk_example(&image, model, "car") else { continue };
+        let ms = m.cycles_per_ms();
+        let mut reports: Vec<[u8; 4]> = Vec::new();
+        let run = |m: &mut Machine, t: u64, reports: &mut Vec<[u8; 4]>| {
+            assert_eq!(m.run(t * ms), Stop::Budget, "{}: {:?}", name, m.cpu.fault);
+            for f in m.can().tx.iter().filter(|f| f.id == 0x7f8 && f.len == 4) {
+                reports.push([f.data[0], f.data[1], f.data[2], f.data[3]]);
+            }
+            m.can().tx.retain(|f| f.id != 0x7f8);
+        };
+        let press = |m: &mut Machine, code: u8| m.can_send_cyclic(Frame::new(0x5c3, &[0x39, code]), 100);
+        run(&mut m, 300, &mut reports);
+        assert!(reports.contains(&[b'I', 0xff, 0, 0]), "{}: {:?}", name, reports);
+        m.set_ignition(true);
+        run(&mut m, 500, &mut reports);
+        assert!(reports.contains(&[b'I', 3, 0, 0]), "{}: {:?}", name, reports);
+        // The cluster's lines, once a second while the ignition message comes.
+        let cluster: Vec<Frame> = m.can().tx.iter().filter(|f| f.id == 0x363 || f.id == 0x365).cloned().collect();
+        assert!(cluster.contains(&Frame::new(0x363, b"RNSE SDK")), "{}: {:?}", name, cluster);
+        assert!(cluster.contains(&Frame::new(0x365, b"WAITING ")), "{}: {:?}", name, cluster);
+
+        // Volume up, short: one detent.
+        press(&mut m, 0x06);
+        run(&mut m, 300, &mut reports);
+        press(&mut m, 0x00);
+        run(&mut m, 300, &mut reports);
+        assert!(reports.contains(&[b'W', 0x06, 0, 0]) && reports.contains(&[b'V', 0, 1, 0]), "{}: {:?}", name, reports);
+        assert!(!reports.iter().any(|r| r[0] == b'V' && r[2] == 2), "{}: {:?}", name, reports);
+        // Volume down, held for 1.3 s: one detent, then five a second.
+        press(&mut m, 0x07);
+        run(&mut m, 1_300, &mut reports);
+        press(&mut m, 0x00);
+        run(&mut m, 300, &mut reports);
+        let total = reports.iter().rev().find(|r| r[0] == b'V').map(|r| i16::from_be_bytes([r[1], r[2]])).unwrap();
+        assert!((-5..=-3).contains(&total), "{}: volume {} after the hold: {:?}", name, total, reports);
+        // Seek up and down: NEXT and PREV.
+        press(&mut m, 0x04);
+        run(&mut m, 300, &mut reports);
+        press(&mut m, 0x05);
+        run(&mut m, 300, &mut reports);
+        press(&mut m, 0x00);
+        run(&mut m, 300, &mut reports);
+        assert!(reports.contains(&[b'K', 19, 1, 0]) && reports.contains(&[b'K', 21, 1, 0]), "{}: {:?}", name, reports);
+        // A key whose frames stop is let go: a lone frame, and half a
+        // second later another press of the same key counts again.
+        m.can_send_cyclic(Frame::new(0x5c3, &[0x39, 0]), 10_000_000); // no more
+        m.can_frame(Frame::new(0x5c3, &[0x39, 0x05]));
+        run(&mut m, 800, &mut reports);
+        m.can_frame(Frame::new(0x5c3, &[0x39, 0x05]));
+        run(&mut m, 800, &mut reports);
+        assert!(reports.contains(&[b'K', 21, 3, 0]), "{}: {:?}", name, reports);
+        let cluster: Vec<Frame> = m.can().tx.iter().filter(|f| f.id == 0x365).cloned().collect();
+        assert!(cluster.contains(&Frame::new(0x365, b"PREV    ")), "{}: {:?}", name, cluster);
+        // Ignition off.
+        m.set_ignition(false);
+        run(&mut m, 300, &mut reports);
+        assert!(reports.contains(&[b'I', 0, 0, 0]), "{}: {:?}", name, reports);
+    }
+}
