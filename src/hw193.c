@@ -713,6 +713,34 @@ static u16 sdhi_clock;
  * MB/s at 0, 1.48 at 1).  Takes effect at the next sdhi_start. */
 u16 sdhi_fast_clock = 0x0000;
 
+/* The program's idle work (sd_idle: the faceplate answered) while the
+ * SD host waits, at most every millisecond and never from inside itself.
+ * Without it a card's start (a slot switch of 50 ms, its readiness polled
+ * in steps of 20 ms, each command's answer waited for up to 500 ms) left
+ * the faceplate unanswered, and a bench 193 whose program started its
+ * cards again and again (the viewer without a bridge, the menu loader
+ * looking at its slots) went dark, faceplate, screen and keys, for good
+ * (2026-11-21). */
+static void sdhi_idle(void)
+{
+    static int inside;
+    static u32 last;
+    u32 now = millis();
+    if (!sd_idle || inside || now == last)
+        return;
+    last = now;
+    inside = 1;
+    sd_idle();
+    inside = 0;
+}
+
+static void sdhi_delay(u32 ms)
+{
+    u32 start = millis();
+    while (millis() - start < ms)
+        sdhi_idle();
+}
+
 static int sdhi_wait(u32 reg, u16 bits, u16 errors, u32 ms)
 {
     u32 start = millis();
@@ -724,6 +752,7 @@ static int sdhi_wait(u32 reg, u16 bits, u16 errors, u32 ms)
             return 0;
         if (millis() - start > ms)
             return -0x10000;
+        sdhi_idle();
     }
 }
 
@@ -815,7 +844,7 @@ int sdhi_start(int slot)
     REG16(SD_SELECT) = (u16)(slot & 1);
     sdhi_clock = 0x0020;             /* slow while the card starts, as stock */
     REG16(SD_CLK) = 0;
-    delay_ms(50);
+    sdhi_delay(50);
     sdhi_command(0x0000, 0, 0);      /* CMD0 */
     e = sdhi_command(0x0008, 0x1aa, &r); /* CMD8: version 2 if it answers */
     v2 = e == 0 && (r & 0xfff) == 0x1aa;
@@ -831,7 +860,7 @@ int sdhi_start(int slot)
             break;
         if (millis() - start > 1500)
             return -5;
-        delay_ms(20);
+        sdhi_delay(20);
     }
     sdhi_ccs = v2 && (r & 0x40000000);
     if (sdhi_command(0x0002, 0, 0))  /* CMD2 */

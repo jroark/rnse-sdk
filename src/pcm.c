@@ -239,8 +239,13 @@ static void audio_open_193(void)
         REG32(AUDIO_MUTE) |= 0x2000;
     }
     audio_key();
-    /* (Bit 2 of the port's data, 0xff909004, is left alone: set here, a
-     * bench 193's screen, faceplate and keys went dark, 2026-11-21.) */
+    /* Bit 2 of the port's data (0xff909004), which the driver's one-time
+     * set-up clears: high on the bench 193 when the stock software had
+     * played a card's MP3 before handing over, and with it the sound
+     * came out; low and silent otherwise (2026-11-21).  Being tried
+     * again: its first trial was confounded (the bridge was out, and
+     * without it the viewer's front went dark whatever it did). */
+    REG32(AUDIO_PORT + 4) |= 0x4;
     REG32(AUDIO_PORT) &= ~0x20000000u;
     delay_ms(1);
     REG32(AUDIO_PORT) |= 0x20000000u;
