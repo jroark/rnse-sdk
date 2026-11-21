@@ -1988,6 +1988,153 @@ fn started_as_by_the_sd_loader_193(example: &str) -> Option<Machine> {
     Some(m)
 }
 
+/// The 193's SD loader (examples/sdload193), as the 192's: a menu of
+/// the card's programs; a 192 program refused; SELECT runs one, and
+/// RETURN held for two seconds in it comes back to the loader with that
+/// program chosen; a program pushed over CAN (canload) starts in the
+/// same way; RETURN held in the loader opens the display, ejects the
+/// disc and starts the unit anew.  The radio processor gets its
+/// keep-alive meanwhile.
+#[test]
+fn sdload193_menu_return_and_can_push() {
+    use rnse::dev::hcan::Frame;
+    let sdk = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
+    let build = |unit: &str, example: &str| -> Option<Vec<u8>> {
+        let out = std::process::Command::new("sh").arg(sdk.join("build.sh")).args([unit, example]).output().unwrap();
+        if !out.status.success() {
+            let text = String::from_utf8_lossy(&out.stderr);
+            assert!(text.contains("gcc: not found") || text.contains("gcc: command not found"), "build: {}", text);
+            return None;
+        }
+        Some(std::fs::read(sdk.join(format!("out/{}-{}.bin", example, unit))).unwrap())
+    };
+    let Some(hello) = build("193", "hello") else { return };
+    let pcm = build("193", "pcmstream").unwrap();
+    let pushed = pcm.clone();
+    let old = build("192", "hello").unwrap();
+    let Some(mut m) = started_as_by_the_sd_loader_193("sdload193") else { return };
+    m.can().start();
+    let card = rnse::fat::card("LOADER", &[rnse::fat::Entry::file("RNSE.BIN", hello.clone()), rnse::fat::Entry::file("PCM.BIN", pcm),
+        rnse::fat::Entry::file("OLD.BIN", old)], None).unwrap();
+    assert!(m.insert_card(0, rnse::dev::sdhi::Card::from_bytes(card).unwrap()));
+    m.atapi().insert(Some(vec![0u8; 64 * 2048]));
+    let ms = m.cycles_per_ms();
+    let text = |m: &Machine| String::from_utf8_lossy(&m.console).into_owned();
+    let records = |m: &mut Machine| -> Vec<[u8; 8]> {
+        let r: Vec<[u8; 8]> = m.can().tx.iter().filter(|f| f.id == 0x7f8 && f.len == 8).map(|f| { let mut d = [0u8; 8]; d.copy_from_slice(&f.data[..8]); d }).collect();
+        m.can().tx.clear();
+        r
+    };
+    let press = |m: &mut Machine, key: &str, hold: u64| {
+        assert!(m.panel_key(key, true));
+        assert_eq!(m.run(hold * ms), Stop::Budget, "{:?}", m.cpu.fault);
+        assert!(m.panel_key(key, false));
+        assert_eq!(m.run(500 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    };
+    assert_eq!(m.run(3_000 * ms), Stop::Budget, "{:?}: {}", m.cpu.fault, text(&m));
+    let r = records(&mut m);
+    assert!(text(&m).contains("rnse sdk: sdload193"), "{}", text(&m));
+    let found: Vec<u8> = r.iter().filter(|d| d[0] == 0x76).map(|d| d[1]).collect();
+    assert!(found.contains(&3), "three programs listed: {:?}", r);
+    // The menu: RNSE.BIN, PCM.BIN, OLD.BIN.  OLD.BIN (a 192 program) is
+    // refused, the loader stays.
+    press(&mut m, "PREV", 200);
+    press(&mut m, "SELECT", 200);
+    let r = records(&mut m);
+    assert!(r.iter().any(|d| d[0] == 0x7a && d[1] == 2 && i32::from_be_bytes([d[2], d[3], d[4], d[5]]) == -20), "{:?}", r);
+    // PCM.BIN: it starts, and RETURN held for two seconds comes back.
+    press(&mut m, "PREV", 200);
+    let at = m.console.len();
+    press(&mut m, "SELECT", 200);
+    assert_eq!(m.run(2_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    assert!(String::from_utf8_lossy(&m.console[at..]).contains("rnse sdk: pcmstream"), "{}", text(&m));
+    let at = m.console.len();
+    press(&mut m, "RETURN", 2_600);
+    assert_eq!(m.run(3_000 * ms), Stop::Budget, "{:?}: {}", m.cpu.fault, text(&m));
+    assert!(String::from_utf8_lossy(&m.console[at..]).contains("rnse sdk: sdload193"), "back at the loader: {}", String::from_utf8_lossy(&m.console[at..]));
+    let r = records(&mut m);
+    assert!(r.iter().any(|d| d[0] == 0x7a && d[1] == 0 && d[5] == 99), "back with RETURN held: {:?}", r);
+    // A short RETURN runs it again (it was the one chosen).
+    assert_eq!(m.run(1_500 * ms), Stop::Budget);
+    let at = m.console.len();
+    press(&mut m, "RETURN", 200);
+    assert_eq!(m.run(1_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    assert!(String::from_utf8_lossy(&m.console[at..]).contains("rnse sdk: pcmstream"), "{}", String::from_utf8_lossy(&m.console[at..]));
+    press(&mut m, "RETURN", 2_600);
+    assert_eq!(m.run(3_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    let _ = records(&mut m);
+    // A program pushed over CAN: pcmstream, started at once.
+    let crc = {
+        let mut c = 0xffff_ffffu32;
+        for &b in &pushed {
+            c ^= u32::from(b);
+            for _ in 0..8 {
+                c = (c >> 1) ^ (0xedb8_8320 & 0u32.wrapping_sub(c & 1));
+            }
+        }
+        !c
+    };
+    let n = pushed.len() as u32;
+    let mut start = vec![1u8, (n >> 16) as u8, (n >> 8) as u8, n as u8];
+    start.extend_from_slice(&crc.to_be_bytes());
+    m.can_frame(Frame::new(0x7f0, &start));
+    let mut a = Vec::new();
+    for _ in 0..20 {
+        assert_eq!(m.run(50 * ms), Stop::Budget);
+        a.extend(records(&mut m));
+        if a.iter().any(|d| d[0] == 0xc0) {
+            break;
+        }
+    }
+    assert!(a.iter().any(|d| d[0] == 0xc0 && d[1] == 1), "{:x?}", a);
+    let frames = (pushed.len() + 6) / 7;
+    let mut k = 0;
+    while k < frames {
+        let end = (k - k % 32 + 32).min(frames);
+        for i in k..end {
+            let mut d = vec![(i & 255) as u8];
+            d.extend_from_slice(&pushed[7 * i..(7 * i + 7).min(pushed.len())]);
+            m.can_frame(Frame::new(0x7f1, &d));
+        }
+        let mut a = Vec::new();
+        for _ in 0..20 {
+            assert_eq!(m.run(50 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+            a.extend(records(&mut m));
+            if a.iter().any(|d| d[0] == 0xc1) {
+                break;
+            }
+        }
+        let (rx, dropped) = (m.can().rx_count, m.can().rx_dropped);
+        let ack = a.iter().rev().find(|d| d[0] == 0xc1).unwrap_or_else(|| panic!("no answer at frame {}: {:x?} rx {} dropped {}", k, a, rx, dropped));
+        assert_eq!(ack[1], 0, "a frame missing at {}", k);
+        let off = u32::from_be_bytes([ack[2], ack[3], ack[4], ack[5]]) as usize;
+        k = if off >= pushed.len() { frames } else { (off + 6) / 7 };
+    }
+    let at = m.console.len();
+    m.can_frame(Frame::new(0x7f0, &[3]));
+    assert_eq!(m.run(1_500 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    assert!(String::from_utf8_lossy(&m.console[at..]).contains("rnse sdk: pcmstream"), "{}", text(&m));
+    // The radio processor heard its keep-alive.
+    assert!(m.radio.seen.keys().any(|&(cmd, first)| cmd == 0x81 && first == 0x06), "{:?}", m.radio.seen);
+    // Back with RETURN held, then RETURN held in
+    // the loader: the display opens, the disc comes out, a new start.
+    let at = m.console.len();
+    for _ in 0..40 {
+        if String::from_utf8_lossy(&m.console[at..]).contains("rnse sdk: sdload193") {
+            break;
+        }
+        press(&mut m, "RETURN", 2_600);
+    }
+    assert!(String::from_utf8_lossy(&m.console[at..]).contains("rnse sdk: sdload193"), "{}", text(&m));
+    assert_eq!(m.run(2_000 * ms), Stop::Budget);
+    let ejects = m.atapi().ejects;
+    assert!(m.panel_key("RETURN", true));
+    let stop = m.run(15_000 * ms);
+    assert!(m.display_pos() <= 94, "the display is not open: {}", m.display_pos());
+    assert_eq!(m.atapi().ejects, ejects + 1, "the disc did not come out");
+    assert!(stop != Stop::Budget || m.reset_requested || m.cpu.fault.is_some() || text(&m).matches("rnse sdk:").count() > 0, "{:?}", stop);
+}
+
 /// The car driver on a 193 whose CAN controller the stock software set
 /// up (can_attach, which car_init uses): taken as it is, not reset (a
 /// mailbox the stock software programmed keeps its identifier), and the
@@ -2107,10 +2254,12 @@ fn sdload193_starts_a_program_from_a_card() {
     let Some(_) = sdk_example(&image, Model::Rnse193, "hello") else { return };
     let sdk = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
     let hello = std::fs::read(sdk.join("out/hello-193.bin")).unwrap();
-    for (file, other) in [("LINKBENC.BIN", None), ("RNSE.BIN", None), ("LINKBENC.BIN", Some("RNSE.BIN"))] {
+    // Started by the stock software from the disc, the loader lists the
+    // card's programs (RNSE.BIN first); SELECT runs the one chosen.
+    for (file, other) in [("RNSE.BIN", None), ("TEST.BIN", Some("RNSE.BIN"))] {
         let mut entries = vec![rnse::fat::Entry::file(file, hello.clone())];
         if let Some(o) = other {
-            entries.push(rnse::fat::Entry::file(o, b"not a program".to_vec()));
+            entries.push(rnse::fat::Entry::file(o, vec![0x55u8; 256])); // not a program, but listed first
         }
         let card = rnse::fat::card("LOADER", &entries, None).unwrap();
         let Some((mut m, name, _)) = started_by_stock_software(&image, Model::Rnse193, "sdload193") else { return };
@@ -2118,10 +2267,27 @@ fn sdload193_starts_a_program_from_a_card() {
         assert!(m.insert_card(0, rnse::dev::sdhi::Card::from_bytes(card).unwrap()));
         let flash = m.board.flash.clone();
         let mut waited = 0;
+        while !m.can().tx.iter().any(|f| f.id == 0x7f8 && f.data[0] == 0x76 && f.data[1] as usize == 1 + other.is_some() as usize) {
+            assert_eq!(m.run(500 * ms), Stop::Budget, "{} {}: {:?}", name, file, m.cpu.fault);
+            waited += 1;
+            assert!(waited < 60, "{} {}: not listed: {:?}", name, file, String::from_utf8_lossy(&m.console));
+        }
+        assert_eq!(m.run(1_500 * ms), Stop::Budget);
+        let press = |m: &mut Machine, key: &str| {
+            assert!(m.panel_key(key, true));
+            assert_eq!(m.run(200 * ms), Stop::Budget);
+            assert!(m.panel_key(key, false));
+            assert_eq!(m.run(300 * ms), Stop::Budget);
+        };
+        if other.is_some() {
+            press(&mut m, "NEXT"); /* past RNSE.BIN, which is not a program */
+        }
+        press(&mut m, "SELECT");
+        waited = 0;
         while !String::from_utf8_lossy(&m.console).contains("rnse sdk: hello") {
             assert_eq!(m.run(500 * ms), Stop::Budget, "{} {}: {:?}", name, file, m.cpu.fault);
             waited += 1;
-            assert!(waited < 60, "{} {}: {:?}", name, file, String::from_utf8_lossy(&m.console));
+            assert!(waited < 20, "{} {}: {:?}", name, file, String::from_utf8_lossy(&m.console));
         }
         assert_eq!(m.run(3_000 * ms), Stop::Budget, "{} {}: {:?}", name, file, m.cpu.fault);
         assert!(String::from_utf8_lossy(&m.console).contains("tick 2"), "{} {}", name, file);

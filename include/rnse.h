@@ -348,8 +348,8 @@ int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max);
  * it once a minute: without it a unit restarts into the stock software
  * after about seven minutes.  Call it often (panel_service does): it
  * sends at the first call and then when a minute has passed, and takes
- * some 6 ms when it does.  192 only (the 193's software sends it too;
- * whether a 193 restarts without it is not known). */
+ * some 6 ms when it does.  Both units (a 193 restarted after some
+ * nine and a half minutes without it). */
 void radio_keepalive(void);
 #define RADIO_CD 1
 #define RADIO_TUNER 3
@@ -443,6 +443,18 @@ int can_send_for(u16 id, const u8 *data, int len, u32 us);
  * data stored; -1 when there is none. */
 int can_receive(u16 *id, u8 *data);
 u32 can_lost(void);
+/* A new program over the bus (src/can.c, tools/canbench.py run ...
+ * --push FILE): canload_init gives a buffer of max bytes that the
+ * running program does not use; every received frame then goes to
+ * canload_frame (it returns 1 for the loader's own, 0x7f0 and 0x7f1),
+ * or canload_poll takes them from can_receive itself.  A whole image
+ * with the right CRC is started with run_image, loader_leave first. */
+void canload_init(void *buffer, u32 max);
+/* What starts it, when set (the SD loader: loader_run, so that RETURN
+ * held comes back to it); run_image otherwise. */
+extern int (*canload_start)(void *image, u32 bytes);
+int canload_frame(u16 id, const u8 *data, int len);
+void canload_poll(void);
 /* The controller's state: its general status register (GSR) in the
  * upper half, the transmit error counter in bits 15..8 and the receive
  * error counter in bits 7..0.  In GSR, as Renesas' HCAN2 has it, bit 0

@@ -189,8 +189,27 @@ int run_image(void *image, u32 bytes)
 #define SESSION ((volatile u32 *)0xac7c0000)
 #define SNAPSHOT 0xac7e0000u
 #define SESSION_MAGIC 0x53444c31u
-#define LOADER_BASE 0x8df00000u
+/* The loader's place, and what of it the session keeps (the 193's
+ * place is 1 MiB, its loader far smaller: the same 128 KiB of it are
+ * kept); the size a program's header gives for its place; the largest
+ * program the loader starts.  The session's RAM, 0x0c7c0000-0x0c800000,
+ * is free on both units while a program runs (the 193's viewer, the
+ * largest so far, ends its heap at 0x0c000000 and its CAN buffer at
+ * 0x0c100000). */
+#define ON_192 (screen_width == 400)
+#define LOADER_BASE (ON_192 ? 0x8df00000u : 0x09b60000u)
 #define LOADER_SIZE 0x20000u
+#define PLACE_SIZE (ON_192 ? 0x20000u : 0x100000u)
+#define PROGRAM_MAX (ON_192 ? 0x1c000u : 0x100000u - 0x80u)
+
+/* The 192's watchdog wants its edges while interrupts are off for a
+ * long copy; the 193's copies here take a few milliseconds and its tick
+ * strobes it otherwise. */
+static void strobe_now(void)
+{
+    if (ON_192)
+        REG8(0xb2300001) ^= 1;
+}
 
 /* A larger second-stage runtime can join its launcher's existing session.
  * Its build must explicitly name its own link address. The restored image,
@@ -198,6 +217,7 @@ int run_image(void *image, u32 bytes)
 #ifndef SDK_SESSION_LOAD
 #define SDK_SESSION_LOAD LOADER_BASE
 #endif
+
 
 static int session_valid(void)
 {
@@ -261,7 +281,7 @@ int loader_run(void *image, u32 bytes, int slot, u32 blocked)
     u32 i, sum = 0;
     volatile u32 *save = (volatile u32 *)SNAPSHOT;
     if ((u32)_load != LOADER_BASE || slot < 0 || slot > 1 || bytes < 32 ||
-        bytes > 0x1c000 || w[4] != 0x524e5345 || w[5] != LOADER_SIZE)
+        bytes > PROGRAM_MAX || w[4] != 0x524e5345 || w[5] != PLACE_SIZE)
         return -1;
     for (i = 0; i < 3; i++)
         if ((w[i] & 1) || w[i] < LOADER_BASE + 0xa0 || w[i] >= LOADER_BASE + 0x80 + bytes)
@@ -276,7 +296,7 @@ int loader_run(void *image, u32 bytes, int slot, u32 blocked)
         u32 v = ((volatile u32 *)UNCACHED(LOADER_BASE))[i];
         save[i] = v;
         sum += v;
-        if (!(i & 1023)) REG8(0xb2300001) ^= 1;
+        if (!(i & 1023)) strobe_now();
     }
     SESSION[0] = SESSION_MAGIC;
     SESSION[1] = ~SESSION_MAGIC;
@@ -307,16 +327,22 @@ void loader_return(int status)
     for (i = 0; i < LOADER_SIZE / 4; i++) {
         sum += ((volatile u32 *)SNAPSHOT)[i];
         if (!(i & 1023))
-            REG8(0xb2300001) ^= 1;
+            strobe_now();
     }
     if (sum != SESSION[6])
         return; /* corrupted backup: never execute it */
     display_halt();
     irq_disable();
-    /* Stop timers and every DMA channel before restoring live code. */
+    /* Stop timers and every DMA channel before restoring live code (the
+     * 193: the two channels in use, sound and the SD host's). */
     REG8(0xffd80004) = 0;
-    for (i = 0; i < 8; i++)
-        REG32(0xffa0000c + (i < 4 ? i : i + 1) * 0x10) = 0;
+    if (ON_192) {
+        for (i = 0; i < 8; i++)
+            REG32(0xffa0000c + (i < 4 ? i : i + 1) * 0x10) = 0;
+    } else {
+        REG32(0xff801180 + 0x30) = 1;
+        REG32(0xff801200 + 0x30) = 1;
+    }
     SESSION[4] = 2;
     SESSION[5] = (u32)status;
     for (i = 0; i < (u32)(way_back_stub_end - way_back_stub); i++)

@@ -1,21 +1,29 @@
-/* A first SD loader for the 193: starts RNSE.BIN from a card or the SD
- * bridge in either slot, so that programs need no new disc.  Written
- * after the bench 193's first evening (2026-11-20, see probe193), and
- * careful in the ways that evening asked for:
+/* The SD loader for the 193, as the 192's (examples/sdboot) and more:
+ * on a disc in the loader's place, started by the stock software (the
+ * disc's index higher than the unit's), it stays as the loader the
+ * programs return to.
  *
- *   - it reports on the CAN bus through the controller as the stock
- *     software left it (mailbox 1, no reset): the kit's can_init did
- *     not work on the unit, and this did;
- *   - it starts the faceplate controller, which lights the screen
- *     (examples/panel193), and of its keys follows CD EJECT only: the
- *     disc comes out through the drive commands examples/eject193 used
- *     on the unit; the display key opens and closes the display (the
- *     kit's display driver, its lines read off the stock software,
- *     2026-11-21).  Switching the unit off and on also brings the stock
- *     software back for some 25 seconds before it starts this again.  (Before 2026-11-20 evening the kit's faceplate
- *     start drove the faceplate port's other lines low and set the drive
- *     ejecting over and over; fixed in src/hw193.c.);
- *   - it starts the unit again after a minute without a program.
+ *   - A menu of the programs, the files NAME.BIN in the top directory of
+ *     the card in either slot (RNSE.BIN first) that fit the 193's place
+ *     (1 MiB): the select knob, NEXT and PREV choose, SELECT runs.  A
+ *     program that is not a 193 program says so when chosen.
+ *   - RETURN held for two seconds in a program comes back here, with
+ *     that program chosen; RETURN then runs it again.  RETURN held for
+ *     two seconds here goes back to the stock software: the display
+ *     opens, the disc is ejected, and the unit starts anew (no flash is
+ *     written).
+ *   - A program pushed over CAN (tools/canbench.py run ... --push FILE,
+ *     the kit's canload) starts at once, as if chosen here: nothing to
+ *     swap, no reset (the 193 asks for its PIN at every start).
+ *   - The key next to the power button opens and closes the display,
+ *     CD EJECT ejects the disc, and the radio processor gets its
+ *     keep-alive (panel_service), wherever the loader waits.  There is
+ *     no way from here to the stock updater or to any writing of the
+ *     flash (CLAUDE.md, "Mandatory hardware behavior").
+ *
+ * Its reports go out on CAN through the controller as the stock software
+ * left it (mailbox 1, no reset: the kit's can_init left the bench 193's
+ * bus silent), and receiving takes it as it is too (can_attach).
  *
  * The card is read through the chip's SD host (src/hw193.c, sdhi_*),
  * one data line, polled.  Records on 0x7F8 (test, item, value, second):
@@ -32,11 +40,14 @@
  *   0x74 r     sd_load's result; value: the file's size; second: the
  *              slot, plus 0x10 for LINKBENC.BIN
  *   0x75 0     CRC-32 of what was loaded, then the program is started
- *   0x76 n     the n-th round without a program
- *   0x79 0     CD EJECT pressed: the eject's result (0 done)
- *   0xff 0xff  no program in a minute: the unit starts again */
+ *   0x76 n     a look at the slots: n programs found
+ *   0x7a 0     back from a program: value its status
+ *   0x7a 1     going back to the stock software
+ *   0x7a 2     a program not started: value why (loader_run's answer,
+ *              or -20 not a 193 program, or the load's error) */
 #include "rnse.h"
 
+extern char _load[]; /* link.ld: the loader's place */
 #define CAN 0xffdf0000
 #define CAN_MB1 (CAN + 0x100 + 0x20)
 #define WATCHDOG 0xffc44008
@@ -86,89 +97,6 @@ static void step(int s)
     say(0x55, (u8)s, 0, 0);
 }
 
-/* The drive's status with a counted wait for the bits to clear. */
-static int clear(u8 bits)
-{
-    u32 n;
-    for (n = 0; n < 20000000; n++)
-        if (!(cd_alt_status() & bits))
-            return 0;
-    return -1;
-}
-
-/* One packet command without data, as examples/probe193 and eject193
- * sent it on the unit. */
-static int packet(const u8 *command)
-{
-    int i;
-    if (clear(0x80))
-        return 1;
-    cd_reg_write(6, 0xa0);
-    if (clear(0x88))
-        return 2;
-    cd_reg_write(1, 0x00);
-    cd_reg_write(4, 0x00);
-    cd_reg_write(5, 0x08);
-    cd_reg_write(7, 0xa0);
-    cd_alt_status();
-    if (clear(0x80))
-        return 3;
-    if (!(cd_alt_status() & 0x08))
-        return 0x100 | cd_reg_read(1);
-    for (i = 0; i < 12; i += 2)
-        cd_data_write((u16)(command[i] << 8 | command[i + 1]));
-    cd_alt_status();
-    if (clear(0x80))
-        return 4;
-    if (cd_reg_read(7) & 0x01)
-        return 0x100 | cd_reg_read(1);
-    return 0;
-}
-
-/* The faceplate answered (and with it the screen's lighting), the
- * display key and CD EJECT followed; called wherever this waits,
- * sd_load's reads too. */
-static void service(void)
-{
-    static const u8 allow_removal[12] = { 0x1e, 0, 0, 0, 0 };
-    static const u8 eject[12] = { 0x1b, 1, 0, 0, 2 };
-    static int was;
-    int down, r;
-    panel_poll();
-    display_follow_key();
-    down = panel_key(KEY_CD_EJECT);
-    if (down && !was) {
-        r = packet(allow_removal);
-        if (r == 0)
-            r = packet(eject);
-        say(0x79, 0, (u32)r, 0);
-    }
-    was = down;
-}
-
-static void wait_ms(u32 ms)
-{
-    u32 end = millis() + ms;
-    while ((s32)(millis() - end) < 0) {
-        service();
-        cpu_idle();
-    }
-}
-
-static void sd_said(int cmd, u32 arg, u32 response, int result)
-{
-    if (cmd >= 0x100) {
-        /* A pin register before (0x100 + n) or after (0x110 + n) the
-         * stock software's settings: the address, then the value. */
-        say(0x77, (u8)cmd, arg, 0);
-        say(0x78, (u8)cmd, response, 0);
-        return;
-    }
-    say(0x71, (u8)cmd, arg, response & 0xffff);
-    if (result)
-        say(0x72, (u8)cmd, (u32)result, response >> 16);
-}
-
 static u32 crc32(const u8 *p, u32 n)
 {
     u32 c = 0xffffffff;
@@ -181,15 +109,242 @@ static u32 crc32(const u8 *p, u32 n)
     return ~c;
 }
 
+/* ---- the menu ------------------------------------------------------ */
+
+#define MAX_FILES 12
+#define FROM_MENU 1
+#define FROM_CAN 2
+#define FIRST_ROW 5
+
+static struct {
+    char name[12];
+    u8 slot;
+} files[MAX_FILES];
+static int nfiles, chosen;
+static int seen_slot[2];
+static const int text_scale = 2;
+
+static void line(int r, const char *text, u8 colour)
+{
+    int y = 16 + 20 * r;
+    screen_fill(0, y - 2, screen_width, 20, 0);
+    if (text)
+        screen_text(16, y, text, colour, text_scale);
+}
+
+static int same(const char *a, const char *b)
+{
+    int i;
+    for (i = 0; i < 11; i++)
+        if (a[i] != b[i])
+            return 0;
+    return 1;
+}
+
+static void file_name(char *out, const char *name)
+{
+    int i;
+    for (i = 0; i < 8 && name[i] != ' '; i++)
+        *out++ = name[i];
+    *out++ = '.';
+    for (i = 8; i < 11 && name[i] != ' '; i++)
+        *out++ = name[i];
+    *out = 0;
+}
+
+static char *put_dec(char *p, int v)
+{
+    char t[12];
+    int n = 0;
+    u32 u = v < 0 ? (u32)-v : (u32)v;
+    if (v < 0)
+        *p++ = '-';
+    do {
+        t[n++] = (char)('0' + u % 10);
+        u /= 10;
+    } while (u);
+    while (n)
+        *p++ = t[--n];
+    *p = 0;
+    return p;
+}
+
+static void draw_menu(void)
+{
+    char text[40], *p;
+    int i;
+    line(FIRST_ROW - 1, nfiles ? "KNOB, NEXT, PREV: CHOOSE.  SELECT: RUN" : "NO PROGRAMS ON THE CARDS (NAME.BIN)", 2);
+    for (i = 0; i < MAX_FILES; i++) {
+        if (i >= nfiles) {
+            line(FIRST_ROW + i, 0, 0);
+            continue;
+        }
+        p = text;
+        *p++ = i == chosen ? '>' : ' ';
+        *p++ = ' ';
+        file_name(p, files[i].name);
+        while (*p)
+            p++;
+        *p++ = ' ', *p++ = ' ', *p++ = 'S', *p++ = 'L', *p++ = 'O', *p++ = 'T', *p++ = ' ';
+        *p++ = (char)(files[i].slot ? '1' : '2');
+        *p = 0;
+        line(FIRST_ROW + i, text, i == chosen ? 2 : 1);
+    }
+}
+
+/* The programs on the cards: slot 1 (select 1) first, then slot 2; a
+ * card whose file system does not mount (the SD bridge, to this
+ * loader) has none.  Called while nothing runs: a card that went in is
+ * found at the next look. */
+static void scan(void)
+{
+    char name[12];
+    u32 size;
+    int slot, i, k, r;
+    nfiles = 0;
+    for (k = 0; k < 2; k++) {
+        slot = k == 0 ? 1 : 0;
+        r = sd_init(slot);
+        say(0x73, (u8)slot, (u32)r, 0);
+        seen_slot[slot] = r == 0;
+        if (r)
+            continue;
+        for (i = 0; nfiles < MAX_FILES && sd_list(i, name, &size) == 0; i++) {
+            if (name[8] != 'B' || name[9] != 'I' || name[10] != 'N' || name[0] == '_')
+                continue;
+            if (size < 0x20 || size > MAX_PROGRAM - 0x80)
+                continue;
+            files[nfiles].slot = (u8)slot;
+            for (r = 0; r < 12; r++)
+                files[nfiles].name[r] = name[r];
+            /* RNSE.BIN first: the card's own program. */
+            if (same(name, "RNSE    BIN") && nfiles) {
+                files[nfiles] = files[0];
+                files[0].slot = (u8)slot;
+                for (r = 0; r < 12; r++)
+                    files[0].name[r] = name[r];
+            }
+            nfiles++;
+        }
+    }
+    say(0x76, (u8)nfiles, millis(), 0);
+    if (chosen >= nfiles)
+        chosen = 0;
+}
+
+/* A program of the menu, loaded and started in the loader's session;
+ * returns (the reason, below 0) only when it was not started. */
+static int run_file(int i)
+{
+    char text[40], *p;
+    u32 size;
+    int r;
+    r = sd_init(files[i].slot);
+    if (r == 0)
+        r = sd_load(files[i].name, BUFFER, MAX_PROGRAM, &size);
+    if (r == 0 && (((u32 *)BUFFER)[0] & 0xfff00000) != ((u32)_load & 0xfff00000))
+        r = -20; /* a 192 program, say */
+    if (r) {
+        say(0x7a, 2, (u32)r, 0);
+        p = (char *)text;
+        file_name(p, files[i].name);
+        while (*p)
+            p++;
+        if (r == -20) {
+            const char *m = ": NOT A 193 PROGRAM";
+            while (*m)
+                *p++ = *m++;
+            *p = 0;
+        } else {
+            const char *m = ": NOT LOADED ";
+            while (*m)
+                *p++ = *m++;
+            put_dec(p, r);
+        }
+        line(2, text, 2);
+        return r;
+    }
+    say(0x75, 0, crc32(BUFFER, size), 0);
+    line(2, "STARTING IT", 2);
+    loader_note(files[i].name, FROM_MENU);
+    display_wait(10000); /* a display on its way gets there first */
+    r = loader_run(BUFFER, size, files[i].slot, 0);
+    say(0x7a, 2, (u32)r, 0);
+    line(2, "IT DID NOT START", 2);
+    return r;
+}
+
+/* canload's way to start a pushed program: in the session, as if it had
+ * been chosen here (so that RETURN held comes back). */
+static int run_pushed(void *image, u32 bytes)
+{
+    int r;
+    say(0x75, 1, crc32(image, bytes), 0);
+    loader_note("CAN PUSH   ", FROM_CAN);
+    display_wait(10000);
+    r = loader_run(image, bytes, 0, 0);
+    say(0x7a, 2, (u32)r, 0);
+    line(2, "THE PUSHED PROGRAM DID NOT START", 2);
+    return r;
+}
+
+/* RETURN held: back to the stock software.  The disc would start this
+ * loader again, so it goes out first (the display opened, as it hides
+ * the drive); then the unit starts anew: nothing written to the flash. */
+static void to_stock(void)
+{
+    u32 t;
+    say(0x7a, 1, 0, 0);
+    line(2, "BACK TO THE STOCK SOFTWARE", 2);
+    line(3, "OPENING THE DISPLAY", 1);
+    display_open();
+    if (display_wait(10000) == DISPLAY_OPEN) {
+        line(3, "EJECTING THE DISC: TAKE IT OUT", 1);
+        cd_eject();
+    } else {
+        line(3, "THE DISPLAY DID NOT OPEN: DISC LEFT IN", 2);
+    }
+    t = millis();
+    while (millis() - t < 3000) {
+        panel_service();
+        cpu_idle();
+    }
+    restart();
+}
+
+/* The CAN frames the loader gets: canload's.  While they come, the
+ * slots are left alone (a look at an empty slot waits out its time). */
+static u32 can_seen;
+
+static void can_frames(void)
+{
+    u16 id;
+    u8 d[8];
+    int len;
+    while ((len = can_receive(&id, d)) >= 0)
+        if (canload_frame(id, d, len))
+            can_seen = millis();
+}
+
+static void idle(void)
+{
+    panel_service();
+    can_frames();
+}
+
 int main(void)
 {
-    u32 sr, size = 0, round;
-    int slot, r;
+    u32 sr, blocked = 0, keys_start, last_scan;
+    int r, status = 0, returned, return_armed = 0, i;
+    int next_down = 0, prev_down = 0, select_down = 0;
+    char noted[12], text[40];
+    u32 flags = 0;
 
+    returned = loader_returned(&status, &blocked);
     __asm__ volatile("stc sr, %0" : "=r"(sr));
     /* What the stock software had queued on the bus is taken back. */
     REG32(CAN + 0x28) = 0xfffffffe;
-    say(0x70, 0, sr, 0);
+    say(0x70, (u8)(returned >= 0), sr, 0);
 
     board_init_step = step;
     board_init();
@@ -198,41 +353,82 @@ int main(void)
     say(0x55, 0xff, millis(), 0);
     console_puts("\nrnse sdk: sdload193\n");
     screen_palette(1, 255, 255, 255);
-    screen_text(16, 16, "SD LOADER 193: LINKBENC.BIN OR RNSE.BIN", 1, 2);
-    screen_text(16, 48, "SLOT 2, THEN SLOT 1.  CD EJECT WORKS", 1, 2);
+    screen_palette(2, 255, 160, 0);
+    line(0, "SD LOADER 193", 2);
+    line(1, "RETURN: RUN AGAIN.  HELD 2 S: STOCK.  CAN PUSH: READY", 1);
+    screen_text(16, screen_height - 24, "KEY BY THE POWER BUTTON: DISPLAY.  CD EJECT: DISC OUT", 2, text_scale);
     panel_init();
-    sd_idle = service;
-    wait_ms(500); /* the faceplate's start and the lighting */
-
-    sdhi_trace = sd_said;
-    for (round = 0; round < 30; round++) {
-        for (slot = 0; slot < 2; slot++) {
-            r = sd_init(slot);
-            say(0x73, (u8)slot, (u32)r, 0);
-            if (r)
-                continue;
-            sdhi_trace = 0; /* the reads themselves are not told */
-            /* The SD bridge's pushed program first (link.py serve puts
-             * it there as LINKBENC.BIN), then a card's RNSE.BIN. */
-            r = sd_load("LINKBENCBIN", BUFFER, MAX_PROGRAM, &size);
-            say(0x74, (u8)r, size, (u16)(slot | 0x10));
-            if (r) {
-                r = sd_load("RNSE    BIN", BUFFER, MAX_PROGRAM, &size);
-                say(0x74, (u8)r, size, (u16)slot);
-            }
-            if (r == 0) {
-                say(0x75, 0, crc32(BUFFER, size), 0);
-                screen_text(16, 80, "STARTING THE PROGRAM", 1, 2);
-                wait_ms(100);
-                r = run_image(BUFFER, size);
-                say(0x75, 1, (u32)r, 0); /* only when it was no program */
-            }
-            sdhi_trace = sd_said;
-        }
-        say(0x76, (u8)round, millis(), 0);
-        wait_ms(2000);
+    sd_idle = idle;
+    display_idle = idle;
+    can_attach();
+    canload_init(BUFFER, MAX_PROGRAM);
+    canload_start = run_pushed;
+    /* RETURN held is this loader's own: back to the stock software. */
+    panel_return_to_loader = 0;
+    sdhi_trace = 0;
+    if (returned >= 0) {
+        char *p = text;
+        const char *m = status == LOADER_RETURN_HELD ? "BACK: RETURN HELD" : "BACK: THE PROGRAM ENDED, ";
+        while (*m)
+            *p++ = *m++;
+        *p = 0;
+        if (status != LOADER_RETURN_HELD)
+            put_dec(p, status);
+        line(2, text, 1);
+        say(0x7a, 0, (u32)status, 0);
     }
-    say(0xff, 0xff, millis(), 0);
-    restart();
+    keys_start = millis();
+    scan();
+    if (loader_noted(noted, &flags))
+        for (i = 0; i < nfiles; i++)
+            if (same(files[i].name, noted))
+                chosen = i;
+    draw_menu();
+    last_scan = millis();
+    for (;;) {
+        int knob;
+        idle();
+        /* RETURN counts once the faceplate answers, a second after the
+         * start, and once it has been seen let go: a RETURN still held
+         * from the program that just ended is not a new one. */
+        if (!return_armed && panel_online() && millis() - keys_start >= 1000 && !panel_key(KEY_RETURN)) {
+            return_armed = 1;
+            (void)panel_return_short();
+            (void)panel_return_held();
+        }
+        if (return_armed && panel_return_held())
+            to_stock();
+        if (return_armed && panel_return_short() && nfiles) {
+            r = run_file(chosen);
+            draw_menu();
+        }
+        knob = panel_knob(KNOB_SELECT);
+        if (panel_key(KEY_NEXT) && !next_down)
+            knob++;
+        if (panel_key(KEY_PREV) && !prev_down)
+            knob--;
+        if (knob && nfiles) {
+            chosen = (int)umod((u32)(chosen + knob + 8 * nfiles), (u32)nfiles);
+            draw_menu();
+        }
+        if (panel_key(KEY_SELECT) && !select_down && nfiles) {
+            r = run_file(chosen);
+            draw_menu();
+        }
+        next_down = panel_key(KEY_NEXT);
+        prev_down = panel_key(KEY_PREV);
+        select_down = panel_key(KEY_SELECT);
+        /* A look at the slots every few seconds while the menu waits: a
+         * card that went in (or came out) shows up. */
+        if (millis() - last_scan >= 4000 && millis() - can_seen >= 3000) {
+            int before = nfiles;
+            scan();
+            if (nfiles != before)
+                draw_menu();
+            last_scan = millis();
+        }
+        cpu_idle();
+    }
+    (void)r;
     return 0;
 }

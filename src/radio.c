@@ -103,9 +103,11 @@ void radio_keepalive(void)
     u16 control;
     u32 start;
     int i;
-    /* (Not on the 193, whose programs panel_service calls this for
-     * too: whether a 193 needs it is not known.) */
-    if (!ON_192 || (sent && millis() - last < 60000))
+    /* (The 193 too: its software sends the same frame once a minute,
+     * and a bench 193 running the Android Auto viewer, which sent it
+     * nothing, restarted into the stock software after some nine and a
+     * half minutes, 2026-11-21.) */
+    if (sent && millis() - last < 60000)
         return;
     sent = 1;
     last = millis();
