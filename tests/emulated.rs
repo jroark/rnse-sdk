@@ -2298,6 +2298,64 @@ fn sdload193_starts_a_program_from_a_card() {
     }
 }
 
+/// examples/dump193 reads a window of memory through P2 and sends it on
+/// the CAN bus, started by the SD loader as RNSE.BIN, touching nothing
+/// else.  A known pattern put in that DRAM page comes back whole on
+/// frames 0x7F9, with the CRC the program sent (0x7F8 record 0xd2).
+#[test]
+fn dump193_sends_a_memory_window() {
+    use rnse::board::Model;
+    let base: u32 = 0x0e9d_e000;
+    let size: usize = 0x1000;
+    let image = match disc() { Some(i) => i, None => return };
+    if sdk_example(&image, Model::Rnse193, "dump193").is_none() { return }
+    let sdk = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
+    let dump = std::fs::read(sdk.join("out/dump193-193.bin")).unwrap();
+    let card = rnse::fat::card("DUMP", &[rnse::fat::Entry::file("RNSE.BIN", dump)], None).unwrap();
+    let (mut m, name, _) = match started_by_stock_software(&image, Model::Rnse193, "sdload193") { Some(x) => x, None => return };
+    let ms = m.cycles_per_ms();
+    // A known pattern in the page, after stock has handed over to the
+    // loader (nothing of ours writes up there).
+    let pattern: Vec<u8> = (0..size).map(|i| ((i * 7 + 13) & 0xff) as u8).collect();
+    for (i, &b) in pattern.iter().enumerate() {
+        assert!(m.poke8(base + i as u32, b), "{}: poke {:#x}", name, base + i as u32);
+    }
+    assert!(m.insert_card(0, rnse::dev::sdhi::Card::from_bytes(card).unwrap()));
+    let flash = m.board.flash.clone();
+    // Run until the program sends its closing CRC record (0xd2); it then
+    // restarts the unit, which the 193 does by letting the watchdog
+    // reset it (Stop::Fault, "reset requested"), so that end is fine.
+    let mut waited = 0;
+    while !m.can().tx.iter().any(|f| f.id == 0x7f8 && f.data[0] == 0xd2) {
+        match m.run(500 * ms) {
+            Stop::Budget => {}
+            Stop::Fault if m.cpu.fault.as_deref() == Some("reset requested") => {}
+            other => panic!("{}: {:?} {:?}", name, other, m.cpu.fault),
+        }
+        waited += 1;
+        assert!(waited < 80, "{}: no dump: {:?}", name, m.cpu.fault);
+    }
+    // Reassemble the window from the 0x7F9 frames.
+    let mut got = vec![0u8; size];
+    let mut seen = vec![false; size];
+    for f in m.can().tx.iter().filter(|f| f.id == 0x7f9 && f.data.len() == 8) {
+        let off = ((f.data[0] as usize) << 16) | ((f.data[1] as usize) << 8) | f.data[2] as usize;
+        for k in 0..5 {
+            if off + k < size { got[off + k] = f.data[3 + k]; seen[off + k] = true; }
+        }
+    }
+    assert!(seen.iter().all(|&s| s), "{}: window not whole", name);
+    assert_eq!(got, pattern, "{}: window differs", name);
+    // The base and the CRC the program sent.
+    let rec = |m: &mut Machine, item: u8| m.can().tx.iter().find(|f| f.id == 0x7f8 && f.data[0] == item)
+        .map(|f| u32::from_be_bytes([f.data[2], f.data[3], f.data[4], f.data[5]]));
+    assert_eq!(rec(&mut m, 0xd0), Some(base), "{}: base", name);
+    assert_eq!(rec(&mut m, 0xd2), Some(crc32(&pattern)), "{}: CRC", name);
+    // It wrote nothing and moved nothing.
+    assert!(m.board.flash == flash, "{}: wrote to the flash", name);
+    assert_eq!(m.atapi().ejects, 0, "{}: moved the drive", name);
+}
+
 fn crc32(data: &[u8]) -> u32 {
     let mut c = 0xffff_ffffu32;
     for &b in data {
