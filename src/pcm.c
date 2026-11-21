@@ -187,36 +187,85 @@ static int put_word(int n, u16 w, u32 ms)
     return 0;
 }
 
-int pcm_start(int n)
+/* The 193's sound path around the interface, as the stock software's
+ * sound driver opens and closes it (V575 1050: its open at 0x8062bae0,
+ * its close at 0x8062bb6a, its one-time set-up at 0x8062b9bc; read off
+ * the code and the emulator's log of it, 2026-11-21):
+ *
+ *   - 0xff9900b8 bit 4 on (after the key at 0xff900864): the interface's
+ *     module.  Without it the interface takes no write (the bench 193:
+ *     its control register read 0 after 0x100bc533 was written);
+ *   - port 0xff909000 bit 29 low, a moment, high: a line out to the
+ *     sound path, low while closed;
+ *   - 0xff90301c = 0x1b;
+ *   - GPIO 0xff93e008 bit 13 low while playing, high when closed (a
+ *     mute, by all appearances; the driver's set-up makes it an output,
+ *     0xff93e004 bit 13).
+ *
+ * The one-time set-up (the ports, the mute an output and on, and the
+ * audio block at 0xff985000/0xff986000 that the software's start makes
+ * with 0xff9900b8 bits 5 and 6) is the stock software's: a program it
+ * started finds it made.  Only when those bits are off (a program that
+ * nothing set up, such as one the boot ROM starts) is the block's part
+ * made here, as that start makes it. */
+#define AUDIO_KEY 0xff900864
+#define AUDIO_MODULES 0xff9900b8
+#define AUDIO_PORT 0xff909000      /* bit 29 */
+#define AUDIO_MUTE_DIR 0xff93e004  /* bit 13 */
+#define AUDIO_MUTE 0xff93e008      /* bit 13 */
+
+static void audio_key(void)
 {
-    u32 i, count = sizeof program / sizeof program[0];
-    if (screen_width != 400) {
-        /* The 193: one output, whatever n says.  First the audio
-         * block's set-up as the stock software makes it once at its
-         * start (seen in the emulator, V575, right after its port
-         * set-up): the clock generator's 0x3c00 and select 0x12, a key
-         * and two enable bits at 0xff9900b8 (module clocks, by the look
-         * of it), and the blocks at 0xff986000 and 0xff985000.  A
-         * program started after the stock loader's bring-up cannot
-         * count on finding them so: on the bench 193 the interface
-         * stayed idle (status bit 25) without them, its DMA loaded
-         * and waiting (2026-11-21).  The port lines the software sets
-         * there too (0xff909000/4) are left alone. */
+    if (!(REG32(AUDIO_KEY) & 1))
+        REG32(AUDIO_KEY) = 0xf0a50f5a;
+}
+
+static void audio_open_193(void)
+{
+    if ((REG32(AUDIO_MODULES) & 0x60) != 0x60) {
         REG32(AUDIO_CLOCK) = 0x3c00;
         REG16(0xff973000) = 0x0012;
-        REG32(0xff900864) = 0xf0a50f5a;
-        REG32(0xff9900b8) |= 0x40;
+        audio_key();
+        REG32(AUDIO_MODULES) |= 0x40;
         REG32(0xff986000) = 0x0009d533;
-        REG32(0xff9900b8) |= 0x20;
+        REG32(AUDIO_MODULES) |= 0x20;
         REG32(0xff985000) = 0x00091100;
         REG32(0xff986010) = 1;
         REG32(0xff986014) = 0x20;
         REG32(0xff986018) = 0x20;
         REG32(0xff986008) = 0;
         REG32(0xff986004) = 0;
+        REG32(AUDIO_MUTE_DIR) |= 0x2000;
+        REG32(AUDIO_MUTE) |= 0x2000;
+    }
+    audio_key();
+    REG32(AUDIO_PORT) &= ~0x20000000u;
+    delay_ms(1);
+    REG32(AUDIO_PORT) |= 0x20000000u;
+    delay_ms(1);
+    REG32(AUDIO_MODULES) |= 0x10;
+    REG32(0xff90301c) = 0x1b;
+    REG32(SSI) = SSI_SETUP;
+    REG32(AUDIO_MUTE) &= ~0x2000u;
+}
+
+static void audio_close_193(void)
+{
+    REG32(SSI) &= 0xe3ff3ffe;
+    REG32(ADMA + 0x30) = 1;
+    REG32(AUDIO_MUTE) |= 0x2000;
+    REG32(AUDIO_PORT) &= ~0x20000000u;
+}
+
+int pcm_start(int n)
+{
+    u32 i, count = sizeof program / sizeof program[0];
+    if (screen_width != 400) {
+        /* The 193: one output, whatever n says. */
         pcm_stop();
         REG32(ADMA_COMMON + 0x18) &= ~(u32)(ADMA_BIT | ADMA_BIT << 1);
         adma_halt();
+        audio_open_193();
         REG32(AUDIO_CLOCK) = AUDIO_CLOCK_44K;
         REG32(ADMA + 0x28) = ADMA_MODE;
         on_193 = 1;
@@ -477,6 +526,7 @@ void pcm_stop(void)
     if (on_193) {
         pcm_stream_stop();
         adma_halt();
+        audio_close_193();
         on_193 = 0;
         return;
     }
