@@ -64,6 +64,9 @@ int main(void)
     u32 shown = 0, return_since = 0;
 
     board_init();
+    /* This program is the motor's test: the key followed on the 193 too,
+     * where the kit leaves it alone otherwise (its lines assumed). */
+    display_key_followed = 1;
     console_puts("\nrnse sdk: display\n");
     s = screen_width / 400;
     screen_palette(1, 90, 90, 90);

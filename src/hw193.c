@@ -150,6 +150,11 @@ void screen_pixel(int x, int y, u8 colour)
 #define ADC 0xff93c000
 
 const int display_input = 4;
+/* Which of the motor lines opens is assumed: the display key is not
+ * followed on the 193 until it has been measured on a unit (the
+ * display opened by hand on the bench; CD EJECT works). */
+int display_key_followed = 0;
+const int cd_port_set_up_at_start = 1;
 
 void display_port_init(void)
 {

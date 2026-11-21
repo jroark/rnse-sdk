@@ -180,6 +180,9 @@ void display_motor(int dir)
     REG8(PORT3 + 1) = v;
 }
 
+int display_key_followed = 1;
+const int cd_port_set_up_at_start = 0;
+
 int display_open_switch(void)
 {
     return !(REG8(PORT3 + 1) & 0x04);

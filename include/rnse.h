@@ -63,6 +63,14 @@ void screen_fill(int x, int y, int w, int h, u8 colour);
 /* A picture of w x h pixels, one byte each, a row every `pitch` bytes,
  * at (x, y).  On the 192, x, w, pitch and the address multiples of 4
  * go a word at a time. */
+/* Per unit (hw192.c, hw193.c): whether panel_service follows the
+ * display key (not yet on the 193, whose motor lines are assumed; a
+ * program that tests the motor, examples/display, sets it), and
+ * whether the drive's port is the stock software's when a program
+ * starts (the 193: cd_eject then uses it as it is). */
+extern int display_key_followed;
+extern const int cd_port_set_up_at_start;
+
 void screen_blit(int x, int y, int w, int h, const u8 *pixels, int pitch);
 /* Text in a 5x7 font, each dot `scale` pixels square.  Upper case,
  * digits and a little punctuation. */
