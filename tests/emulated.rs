@@ -1891,3 +1891,115 @@ fn car_program_follows_the_ignition_and_the_steering_wheel() {
         assert!(reports.contains(&[b'I', 0, 0, 0]), "{}: {:?}", name, reports);
     }
 }
+
+/// examples/first193, the first program for a real 193, started as the
+/// unit would start it: every test runs, the dumps put back together
+/// match the checksums the program sends, and nothing is written to the
+/// flash or the battery-backed memory.  It reads no key (the bench 193
+/// showed the kit's faceplate code misreading the unit's keys).
+#[test]
+fn first193_reads_the_unit_and_writes_nothing() {
+    use rnse::board::Model;
+    let Some(image) = disc() else { return };
+    let Some((mut m, name, _)) = started_by_stock_software(&image, Model::Rnse193, "first193") else { return };
+    let ms = m.cycles_per_ms();
+    // The controller keeps the last 4096 frames sent; the dumps are
+    // many more, so they are taken as they come.
+    let mut sent: Vec<rnse::dev::hcan::Frame> = Vec::new();
+    let flash = m.board.flash.clone();
+    let nvram = m.board.nvram.clone();
+    let mut waited = 0;
+    while !String::from_utf8_lossy(&m.console).contains("DONE") {
+        let stop = m.run(200 * ms);
+        sent.extend(m.can().tx.drain(..));
+        assert_eq!(stop, Stop::Budget, "{}: {:?}", name, m.cpu.fault);
+        waited += 1;
+        assert!(waited < 900, "{}: {:?}", name, String::from_utf8_lossy(&m.console));
+    }
+    let text = String::from_utf8_lossy(&m.console).into_owned();
+    assert!(!text.contains("unexpected"), "{}: {:?}", name, text);
+    assert!(m.board.flash == flash, "{}: the program wrote to the flash", name);
+    assert!(m.board.nvram == nvram, "{}: the program wrote to the battery-backed memory", name);
+    assert_eq!(m.atapi().ejects, 0, "{}: the program moved the drive", name);
+
+    let tx = &sent;
+    let records: Vec<(u8, u8, u32, u16)> = tx.iter().filter(|f| f.id == 0x7f8).map(|f| {
+        let d = f.data;
+        (d[0], d[1], u32::from_be_bytes([d[2], d[3], d[4], d[5]]), u16::from_be_bytes([d[6], d[7]]))
+    }).collect();
+    let opened: Vec<u8> = records.iter().filter(|r| r.1 == 0xfe).map(|r| r.0).collect();
+    assert_eq!(opened, [0x20, 1, 13, 2, 3, 7, 8, 18, 14], "{}", name);
+    let value = |test: u8, item: u8| records.iter().find(|r| r.0 == test && r.1 == item).map(|r| r.2);
+    // The emulated flash says what the data sheet of its chips says.
+    assert_eq!((value(13, 0), value(13, 1), value(13, 0x80)), (Some(0x0001_0001), Some(0x227e_227e), Some(0x0001_0001)), "{}", name);
+    // The dumps: regions 0 (boot ROM), 1 (memory), 2 (flash parameters).
+    let mut mem: std::collections::HashMap<u32, Vec<Option<u8>>> = Default::default();
+    for r in records.iter().filter(|r| r.0 == 18 && r.1 == 0) {
+        mem.insert(r.2, vec![None; (r.3 as usize) << 8]);
+    }
+    for f in tx.iter().filter(|f| f.id == 0x7f9 || f.id == 0x7fa) {
+        let d = &f.data[..f.len as usize];
+        let a = u32::from_be_bytes([0, d[0], d[1], d[2]]);
+        let region = mem.get_mut(&(a >> 22)).unwrap();
+        let o = (a & 0x3f_ffff) as usize;
+        if f.id == 0x7f9 {
+            for (k, b) in d[3..].iter().enumerate() {
+                region[o + k] = Some(*b);
+            }
+        } else {
+            region[o..o + 256].iter_mut().for_each(|b| *b = Some(d[3]));
+        }
+    }
+    for (region, from) in [(0u32, 0usize), (1, usize::MAX), (2, 0x03fe_0000)] {
+        let got: Vec<u8> = mem[&region].iter().map(|b| b.expect("every byte sent")).collect();
+        let expect: &[u8] = if from == usize::MAX { &nvram[..0x4_0000] } else { &flash[from..from + got.len()] };
+        assert!(got == expect, "{}: region {} differs from the unit's", name, region);
+        let crc = records.iter().find(|r| r.0 == 18 && r.1 == 3 && r.3 as u32 == region).map(|r| r.2);
+        assert_eq!(crc, Some(crc32(&got)), "{}: region {}", name, region);
+    }
+}
+
+/// examples/sdload193, the 193's first SD loader, started as the unit
+/// would start it with a card in the first slot: it finds LINKBENC.BIN
+/// (what the SD bridge serves) before RNSE.BIN, starts it, and has
+/// moved neither the drive nor written anywhere.
+#[test]
+fn sdload193_starts_a_program_from_a_card() {
+    use rnse::board::Model;
+    let Some(image) = disc() else { return };
+    let Some(_) = sdk_example(&image, Model::Rnse193, "hello") else { return };
+    let sdk = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
+    let hello = std::fs::read(sdk.join("out/hello-193.bin")).unwrap();
+    for (file, other) in [("LINKBENC.BIN", None), ("RNSE.BIN", None), ("LINKBENC.BIN", Some("RNSE.BIN"))] {
+        let mut entries = vec![rnse::fat::Entry::file(file, hello.clone())];
+        if let Some(o) = other {
+            entries.push(rnse::fat::Entry::file(o, b"not a program".to_vec()));
+        }
+        let card = rnse::fat::card("LOADER", &entries, None).unwrap();
+        let Some((mut m, name, _)) = started_by_stock_software(&image, Model::Rnse193, "sdload193") else { return };
+        let ms = m.cycles_per_ms();
+        assert!(m.insert_card(0, rnse::dev::sdhi::Card::from_bytes(card).unwrap()));
+        let flash = m.board.flash.clone();
+        let mut waited = 0;
+        while !String::from_utf8_lossy(&m.console).contains("rnse sdk: hello") {
+            assert_eq!(m.run(500 * ms), Stop::Budget, "{} {}: {:?}", name, file, m.cpu.fault);
+            waited += 1;
+            assert!(waited < 60, "{} {}: {:?}", name, file, String::from_utf8_lossy(&m.console));
+        }
+        assert_eq!(m.run(3_000 * ms), Stop::Budget, "{} {}: {:?}", name, file, m.cpu.fault);
+        assert!(String::from_utf8_lossy(&m.console).contains("tick 2"), "{} {}", name, file);
+        assert!(m.board.flash == flash, "{} {}: something wrote to the flash", name, file);
+        assert_eq!(m.atapi().ejects, 0, "{} {}: the loader moved the drive", name, file);
+    }
+}
+
+fn crc32(data: &[u8]) -> u32 {
+    let mut c = 0xffff_ffffu32;
+    for &b in data {
+        c ^= b as u32;
+        for _ in 0..8 {
+            c = (c >> 1) ^ (0xedb8_8320 & 0u32.wrapping_sub(c & 1));
+        }
+    }
+    !c
+}
