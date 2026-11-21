@@ -64,8 +64,8 @@ void screen_fill(int x, int y, int w, int h, u8 colour);
  * at (x, y).  On the 192, x, w, pitch and the address multiples of 4
  * go a word at a time. */
 /* Per unit (hw192.c, hw193.c): whether panel_service follows the
- * display key (not yet on the 193, whose motor lines are assumed; a
- * program that tests the motor, examples/display, sets it), and
+ * display key (both units; on the 193 since v0.4.0, its motor lines
+ * read off the stock software), and
  * whether the drive's port is the stock software's when a program
  * starts (the 193: cd_eject then uses it as it is). */
 extern int display_key_followed;

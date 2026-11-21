@@ -101,7 +101,12 @@ void display_tick(void)
             ref_time = now;
         }
     }
-    if (now - ref_time >= STALL_MS || now - start_time >= LIMIT_MS)
+    /* The 193's stock software stops opening at its switch (input
+     * bit 20 low: fully open) rather than letting the motor stall
+     * there; the 192's runs into the stall, as this does there. */
+    if (dir < 0 && screen_width != 400 && display_open_switch())
+        stop_now();
+    else if (now - ref_time >= STALL_MS || now - start_time >= LIMIT_MS)
         stop_now();
 }
 

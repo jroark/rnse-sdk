@@ -166,21 +166,24 @@ void screen_blit(int x, int y, int w, int h, const u8 *pixels, int pitch)
 
 /* The fold-down display (docs/hardware-193.md, "A/D converter and
  * ports").  The port at 0xff93f000 (direction +4, output +8, input
- * +0xc): output bits 19 and 18 drive the motor, input bit 20 is low
- * only when the display is fully open.  Which of the two bits closes is
- * assumed (19), as in the emulator's model: nothing here has been tried
- * on a real 193.  The position is input 4 of the converter at
- * 0xff93c000. */
+ * +0xc): output bit 18 opens, bit 19 closes, input bit 20 is low only
+ * when the display is fully open.  Which bit does what is read off the
+ * stock software's display key (V575 1050, 0x805faa22: a closed display
+ * gets bit 18 and bit 19 cleared, an open one bit 19 and bit 18
+ * cleared, either reverses a run the other way; 0x805fa742 stops at
+ * position 94 with bit 20 low, or 894); a bench 193 had both lines as
+ * outputs and off, bit 20 high and position 979 with its display closed
+ * (examples/first193, 2026-11-20).  The position is input 4 of the
+ * converter at 0xff93c000. */
 #define MOTOR_PORT 0xff93f000
 #define MOTOR_OPEN (1u << 18)
 #define MOTOR_CLOSE (1u << 19)
 #define ADC 0xff93c000
 
 const int display_input = 4;
-/* Which of the motor lines opens is assumed: the display key is not
- * followed on the 193 until it has been measured on a unit (the
- * display opened by hand on the bench; CD EJECT works). */
-int display_key_followed = 0;
+/* The display key opens and closes the display, as on the 192 (the
+ * hardware rules: every program must let the disc out). */
+int display_key_followed = 1;
 const int cd_port_set_up_at_start = 1;
 
 void display_port_init(void)

@@ -9,11 +9,10 @@
  *   - it starts the faceplate controller, which lights the screen
  *     (examples/panel193), and of its keys follows CD EJECT only: the
  *     disc comes out through the drive commands examples/eject193 used
- *     on the unit.  The display key is not followed (which motor line
- *     opens the 193's display is still assumed).  The disc stays in
- *     otherwise; switching the unit off and on brings the stock
- *     software back, which ejects the disc for some 25 seconds before it
- *     starts this again.  (Before 2026-11-20 evening the kit's faceplate
+ *     on the unit; the display key opens and closes the display (the
+ *     kit's display driver, its lines read off the stock software,
+ *     2026-11-21).  Switching the unit off and on also brings the stock
+ *     software back for some 25 seconds before it starts this again.  (Before 2026-11-20 evening the kit's faceplate
  *     start drove the faceplate port's other lines low and set the drive
  *     ejecting over and over; fixed in src/hw193.c.);
  *   - it starts the unit again after a minute without a program.
@@ -126,8 +125,9 @@ static int packet(const u8 *command)
     return 0;
 }
 
-/* The faceplate answered (and with it the screen's lighting), and CD
- * EJECT followed; called wherever this waits, sd_load's reads too. */
+/* The faceplate answered (and with it the screen's lighting), the
+ * display key and CD EJECT followed; called wherever this waits,
+ * sd_load's reads too. */
 static void service(void)
 {
     static const u8 allow_removal[12] = { 0x1e, 0, 0, 0, 0 };
@@ -135,6 +135,7 @@ static void service(void)
     static int was;
     int down, r;
     panel_poll();
+    display_follow_key();
     down = panel_key(KEY_CD_EJECT);
     if (down && !was) {
         r = packet(allow_removal);
