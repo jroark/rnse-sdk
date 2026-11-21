@@ -180,6 +180,13 @@ void display_motor(int dir)
     REG8(PORT3 + 1) = v;
 }
 
+int board_init_display = 1; /* (the 193 only) */
+void screen_init(void)
+{
+}
+int display_key_followed = 1;
+const int cd_port_set_up_at_start = 0;
+
 int display_open_switch(void)
 {
     return !(REG8(PORT3 + 1) & 0x04);
@@ -514,3 +521,5 @@ void board_init(void)
 void (*sdhi_trace)(int cmd, u32 arg, u32 response, int result);
 int sdhi_start(int slot) { (void)slot; return -1; }
 int sdhi_read(u32 sector, void *buf) { (void)sector; (void)buf; return -1; }
+int sdhi_read_multi(u32 sector, u32 count, void *buf) { (void)sector; (void)count; (void)buf; return -1; }
+u16 sdhi_fast_clock;

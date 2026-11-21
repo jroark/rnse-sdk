@@ -175,7 +175,11 @@ int cd_eject(void)
 {
     static const u8 allow_removal[12] = { 0x1e, 0, 0, 0, 0 };
     static const u8 eject[12] = { 0x1b, 1, 0, 0, 2 };
-    if (!port_ready) {
+    /* (On the 193 a program always starts after the stock software,
+     * which has set the drive's port up: the unit ejected that way,
+     * examples/eject193 and sdload193, 2026-11-20, while the kit's own
+     * port setup has not run there yet.) */
+    if (!port_ready && cd_port_set_up_at_start == 0) {
         cd_port_init();
         port_ready = 1;
     }

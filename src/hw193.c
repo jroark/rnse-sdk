@@ -114,10 +114,17 @@ void console_putc(char c)
     REG16(SCFSR) &= (u16)~0x0060;
 }
 
+/* The display unit's 8-bits-through-a-palette plane did not show on the
+ * bench 193 (the picture came out a flat light grey, 2026-11-21), while
+ * 16-bit planes showed their colours exactly (the loader's stripes).
+ * So the 193 draws a 16-bit plane (RGB555, the display unit's format 2,
+ * as the stock software's planes), and keeps a palette of its own: the
+ * kit's drawing stays by colour index, each index an RGB555 word here. */
+static u16 pal555[256];
+
 void screen_palette(int index, u8 r, u8 g, u8 b)
 {
-    /* The plane uses the second of the four palettes. */
-    REG32(PALETTE(2) + 4 * (index & 255)) = (u32)r << 16 | (u32)g << 8 | b;
+    pal555[index & 255] = (u16)(((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3));
 }
 
 void screen_pixel(int x, int y, u8 colour)
@@ -125,7 +132,27 @@ void screen_pixel(int x, int y, u8 colour)
     if (x < 0 || y < 0 || x >= screen_width || y >= screen_height)
         return;
     /* Through the uncached window, so that the display unit sees it. */
-    REG8((SURFACE | 0xa0000000) + (TOP + y) * STRIDE + LEFT + x) = colour;
+    REG16((SURFACE | 0xa0000000) + ((TOP + y) * STRIDE + LEFT + x) * 2) = pal555[colour];
+}
+
+/* A row (or rows) of colour-index pixels, each to its RGB555, faster
+ * than a pixel at a time (the video, examples aaviewer).  Overrides the
+ * weak one in common.c. */
+void screen_blit(int x, int y, int w, int h, const u8 *pixels, int pitch)
+{
+    int i, j;
+    for (j = 0; j < h; j++) {
+        int yy = y + j;
+        volatile u16 *out;
+        if (yy < 0 || yy >= screen_height)
+            continue;
+        out = (volatile u16 *)((SURFACE | 0xa0000000) + ((TOP + yy) * STRIDE + LEFT + x) * 2);
+        for (i = 0; i < w; i++) {
+            int xx = x + i;
+            if (xx >= 0 && xx < screen_width)
+                out[i] = pal555[pixels[j * pitch + i]];
+        }
+    }
 }
 
 /* The faceplate controller: a serial port with FIFO at 0xff926000, and
@@ -150,6 +177,11 @@ void screen_pixel(int x, int y, u8 colour)
 #define ADC 0xff93c000
 
 const int display_input = 4;
+/* Which of the motor lines opens is assumed: the display key is not
+ * followed on the 193 until it has been measured on a unit (the
+ * display opened by hand on the bench; CD EJECT works). */
+int display_key_followed = 0;
+const int cd_port_set_up_at_start = 1;
 
 void display_port_init(void)
 {
@@ -190,11 +222,16 @@ int adc_convert(int input)
 
 void panel_port_init(void)
 {
+    /* Only the reset line (bit 1 of +4) is this code's, as with the
+     * stock software (0x8054fc7c in V5751050: bit 1 low, then high);
+     * the port's other lines are left as they are.  The kit used to
+     * write whole values here (0, 0xc0000000; 0, 1), copied from the
+     * emulator, where the reads before them return 0: on the bench 193
+     * the port reads 0xdfffffff/0xfffffffb, so that drove nearly all
+     * its lines low, and the drive went on ejecting and loading
+     * (2026-11-20). */
     REG16(SCIF_FP + 0x08) = 0;      /* port off */
-    REG32(PORT_FP + 4) = 0;         /* controller in reset */
-    REG32(PORT_FP + 0) = 0;
-    REG32(PORT_FP + 0) = 0xc0000000;
-    REG32(PORT_FP + 4) = 1;
+    REG32(PORT_FP + 4) &= ~2u;      /* controller in reset */
     REG16(SCIF_FP + 0x18) = 0;
     REG16(SCIF_FP + 0x18) = 0x0006; /* both FIFOs held empty */
     REG16(SCIF_FP + 0x10) = REG16(SCIF_FP + 0x10) & 0x0060;
@@ -401,6 +438,94 @@ int can_take(u16 *id, u8 *data)
 void (*board_init_step)(int step);
 #define STEP(n) do { if (board_init_step) board_init_step(n); } while (0)
 
+/* Whether board_init sets the display unit up the kit's way (below);
+ * 0 leaves it as the software before left it (sdload193 reads it so),
+ * and screen_init then does it later. */
+int board_init_display = 1;
+
+static void screen_init_regs(void)
+{
+    int i;
+    /* Display unit, stopped while it is set up: 832 x 496 display
+     * period in a 1056 x 525 frame, data enable 800 wide. */
+    REG32(DU + 0x00) = 0x00100000;
+    REG32(DU + 0x04) = 0x07000000;
+    REG32(DU + 0x0c) = 0x0000cb3f; /* clear every status bit */
+    REG32(DU + 0x10) = 0;          /* no interrupts from it */
+    REG32(DU + 0x14) = 0;
+    REG32(DU + 0x18) = 0x76543210; /* no plane shown yet */
+    for (i = 0x80; i <= 0x9c; i += 4)
+        REG32(DU + i) = 0;
+    REG32(0xfff90000) = 0x00100008;
+    REG32(DU + 0x40) = 0x0b5;
+    REG32(DU + 0x44) = 0x3f5;
+    REG32(DU + 0x48) = 0x018;
+    REG32(DU + 0x4c) = 0x208;
+    REG32(DU + 0x50) = 0x41f;
+    REG32(DU + 0x54) = 0x03f;
+    REG32(DU + 0x58) = 0x20c;
+    REG32(DU + 0x5c) = 0x20a;
+    REG32(DU + 0x78) = 0x0d7;
+    REG32(DU + 0x7c) = 0x320;
+    REG32(DU + 0x00) = 0x00100100; /* running */
+}
+
+static void screen_init_plane(void)
+{
+    int i;
+    STEP(9);
+    /* A black picture before anything shows. */
+    REG32(SURFACE | 0xa0000000) = 0;
+    STEP(91);
+    for (i = 0; i < STRIDE * 496 * 2; i += 4) {
+        REG32((SURFACE | 0xa0000000) + i) = 0;
+        if (board_init_step && (i & 0x7ffc) == 0x7ffc)
+            board_init_step(100 + (i >> 15));
+    }
+    STEP(92);
+    screen_palette(0, 0, 0, 0);
+    STEP(93);
+    for (i = 0; i < 256; i++)
+        screen_palette(i, 0, 0, 0);
+
+    /* Plane 6, 16 bits a pixel (RGB555, the display unit's format 2, as
+     * the stock software's planes), the whole display period; the other
+     * planes off.  Its stride is in pixels (STRIDE), so its surface is
+     * STRIDE x 496 words.  Its transparent colour is a word this code
+     * never writes (bit 15 is always 0 here), so the picture is whole. */
+    for (i = 1; i <= 8; i++)
+        REG32(PLANE(i)) = 0;
+    REG32(PLANE(6) + 0x00) = 0x04000002;
+    REG32(PLANE(6) + 0x04) = STRIDE;
+    REG32(PLANE(6) + 0x08) = 0xff;
+    /* As wide as the surface, as the loader's plane: the picture starts
+     * LEFT pixels in, so a plane 800 wide would leave the panel's last
+     * LEFT columns black. */
+    REG32(PLANE(6) + 0x10) = STRIDE;
+    REG32(PLANE(6) + 0x14) = 496;
+    REG32(PLANE(6) + 0x18) = 0;
+    REG32(PLANE(6) + 0x1c) = 0;
+    REG32(PLANE(6) + 0x20) = SURFACE;
+    REG32(PLANE(6) + 0x24) = SURFACE;
+    REG32(PLANE(6) + 0x28) = SURFACE;
+    REG32(PLANE(6) + 0x30) = 0;
+    REG32(PLANE(6) + 0x34) = 0;
+    REG32(PLANE(6) + 0x38) = 0x3ff0;
+    REG32(PLANE(6) + 0x3c) = 0x0fff;
+    REG32(PLANE(6) + 0x40) = 0;
+    REG32(PLANE(6) + 0x44) = 0;
+    REG32(PLANE(6) + 0x48) = 0x8000;
+    REG32(PLANE(6) + 0x50) = 0x400;
+    REG32(DU + 0x18) = 0x76d43210; /* plane 6 shown */
+    REG32(DU + 0x14) = 0x000f0000;
+}
+
+void screen_init(void)
+{
+    screen_init_regs();
+    screen_init_plane();
+}
+
 void board_init(void)
 {
     int i;
@@ -472,28 +597,8 @@ void board_init(void)
     REG32(WATCHDOG) = (REG32(WATCHDOG) & ~1u) | strobe;
 
     STEP(7);
-    /* Display unit, stopped while it is set up: 832 x 496 display
-     * period in a 1056 x 525 frame, data enable 800 wide. */
-    REG32(DU + 0x00) = 0x00100000;
-    REG32(DU + 0x04) = 0x07000000;
-    REG32(DU + 0x0c) = 0x0000cb3f; /* clear every status bit */
-    REG32(DU + 0x10) = 0;          /* no interrupts from it */
-    REG32(DU + 0x14) = 0;
-    REG32(DU + 0x18) = 0x76543210; /* no plane shown yet */
-    for (i = 0x80; i <= 0x9c; i += 4)
-        REG32(DU + i) = 0;
-    REG32(0xfff90000) = 0x00100008;
-    REG32(DU + 0x40) = 0x0b5;
-    REG32(DU + 0x44) = 0x3f5;
-    REG32(DU + 0x48) = 0x018;
-    REG32(DU + 0x4c) = 0x208;
-    REG32(DU + 0x50) = 0x41f;
-    REG32(DU + 0x54) = 0x03f;
-    REG32(DU + 0x58) = 0x20c;
-    REG32(DU + 0x5c) = 0x20a;
-    REG32(DU + 0x78) = 0x0d7;
-    REG32(DU + 0x7c) = 0x320;
-    REG32(DU + 0x00) = 0x00100100; /* running */
+    if (board_init_display)
+        screen_init_regs();
 
     STEP(8);
     /* A block the loader sets up next (0x09e389b4 and 0x09e389c6 in
@@ -512,45 +617,8 @@ void board_init(void)
         REG32(0xfe800108) = 0x00000000;
     }
 
-    STEP(9);
-    /* A black picture before anything shows. */
-    REG32(SURFACE | 0xa0000000) = 0;
-    STEP(91);
-    for (i = 0; i < STRIDE * 496; i += 4) {
-        REG32((SURFACE | 0xa0000000) + i) = 0;
-        if (board_init_step && (i & 0x3fff) == 0x3ffc)
-            board_init_step(100 + (i >> 14));
-    }
-    STEP(92);
-    screen_palette(0, 0, 0, 0);
-    STEP(93);
-    for (i = 0; i < 256; i++)
-        screen_palette(i, 0, 0, 0);
-
-    /* Plane 6: 8 bits per pixel through palette 2, no transparent
-     * colour, the whole display period; the other planes off. */
-    for (i = 1; i <= 8; i++)
-        REG32(PLANE(i)) = 0;
-    REG32(PLANE(6) + 0x00) = 0x00024100;
-    REG32(PLANE(6) + 0x04) = STRIDE;
-    REG32(PLANE(6) + 0x08) = 0xff;
-    REG32(PLANE(6) + 0x10) = STRIDE;
-    REG32(PLANE(6) + 0x14) = 496;
-    REG32(PLANE(6) + 0x18) = 0;
-    REG32(PLANE(6) + 0x1c) = 0;
-    REG32(PLANE(6) + 0x20) = SURFACE;
-    REG32(PLANE(6) + 0x24) = SURFACE;
-    REG32(PLANE(6) + 0x28) = SURFACE;
-    REG32(PLANE(6) + 0x30) = 0;
-    REG32(PLANE(6) + 0x34) = 0;
-    REG32(PLANE(6) + 0x38) = 0x3ff0;
-    REG32(PLANE(6) + 0x3c) = 0x0fff;
-    REG32(PLANE(6) + 0x40) = 0;
-    REG32(PLANE(6) + 0x44) = 0;
-    REG32(PLANE(6) + 0x48) = 0;
-    REG32(PLANE(6) + 0x50) = 0x400;
-    REG32(DU + 0x18) = 0x76d43210; /* plane 6 shown */
-    REG32(DU + 0x14) = 0x000f0000;
+    if (board_init_display)
+        screen_init_plane();
 
     STEP(10);
     /* The tick: timer 0 at a quarter of the 50 MHz peripheral clock
@@ -602,11 +670,17 @@ void board_init(void)
 #define INFO2_ERRORS 0x807f /* CRC, end bit, timeouts, illegal access */
 #define INFO2_TIMEOUT 0x0040
 #define INFO2_READ 0x0100   /* a block can be read from the data port */
-#define INFO2_IDLE 0x2000
+#define INFO2_BUSY 0x4000 /* the command line is in use */
 
 void (*sdhi_trace)(int cmd, u32 arg, u32 response, int result);
 static int sdhi_ccs, sdhi_slot = -1;
 static u16 sdhi_clock;
+/* The clock's divider once a card has started (bits 7..0 of +0x24: 0
+ * half the interface's clock, 1 a quarter, 2 an eighth, ...); the stock
+ * software takes 0, and so does the kit since examples/speed193 read the
+ * SD bridge at both on the bench 193 without a bad sector (CMD18: 2.9
+ * MB/s at 0, 1.48 at 1).  Takes effect at the next sdhi_start. */
+u16 sdhi_fast_clock = 0x0000;
 
 static int sdhi_wait(u32 reg, u16 bits, u16 errors, u32 ms)
 {
@@ -629,8 +703,13 @@ static int sdhi_command(u16 word, u32 arg, u32 *response)
 {
     int r;
     u32 start = millis();
-    while (!(REG16(SD_INFO2) & INFO2_IDLE))
-        if (millis() - start > 100)
+    /* Until the command line is free (CBSY, bit 14 of INFO2).  The kit
+     * used to wait for bit 13 instead, which the emulator always shows
+     * set; on these hosts it says the clock divider may be changed, and
+     * with the clock running it waited out its 100 ms before every
+     * command: some 4 KB/s on the bench 193. */
+    while (REG16(SD_INFO2) & INFO2_BUSY)
+        if (millis() - start > 10)
             break;
     REG16(SD_CLK) = sdhi_clock;
     REG16(SD_CLK) = (u16)(sdhi_clock | 0x0100);
@@ -698,10 +777,14 @@ int sdhi_start(int slot)
     REG16(SD_MASK1) = 0xffff;        /* no interrupts: polled */
     REG16(SD_MASK2) = 0xffff;
     REG16(SDHI + 0xb2) = 0xffff;
+    /* Select 0 is the unit's physical slot 2, 1 is slot 1 (examples/
+     * slot193 on the bench, 2026-11-20).  The switch takes time: with
+     * 10 ms the first commands still reached the slot selected before;
+     * 20 ms was enough on the unit, 50 is given. */
     REG16(SD_SELECT) = (u16)(slot & 1);
     sdhi_clock = 0x0020;             /* slow while the card starts, as stock */
     REG16(SD_CLK) = 0;
-    delay_ms(10);
+    delay_ms(50);
     sdhi_command(0x0000, 0, 0);      /* CMD0 */
     e = sdhi_command(0x0008, 0x1aa, &r); /* CMD8: version 2 if it answers */
     v2 = e == 0 && (r & 0xfff) == 0x1aa;
@@ -725,7 +808,7 @@ int sdhi_start(int slot)
     if (sdhi_command(0x0003, 0, &r)) /* CMD3: the card's address */
         return -7;
     r &= 0xffff0000;
-    sdhi_clock = 0x0001;             /* faster from here (the stock 0: quarter of that divider's) */
+    sdhi_clock = sdhi_fast_clock;    /* faster from here */
     if (sdhi_command(0x0007, r, 0))  /* CMD7: selected */
         return -8;
     if (!sdhi_ccs && sdhi_command(0x0010, 512, 0)) /* CMD16 */
@@ -733,6 +816,49 @@ int sdhi_start(int slot)
     REG16(SD_SIZE) = 512;
     sdhi_slot = slot;
     return 0;
+}
+
+/* count sectors from sector on with one CMD18.  The host counts the
+ * blocks itself (the count at +0x0a, enabled by bit 8 of +0x08) and then
+ * ends the transfer with CMD12 on its own, as Toshiba's and Renesas' SD
+ * hosts do; each block is taken from the data port as for CMD17.  0, or
+ * minus (0x100 + the block it stopped at) when a block did not come, and
+ * -2 when the card refused the command. */
+int sdhi_read_multi(u32 sector, u32 count, void *buf)
+{
+    u8 *out = buf;
+    u32 b;
+    int i, r;
+    if (sdhi_slot < 0)
+        return -1;
+    if (count == 0)
+        return 0;
+    REG16(SD_SIZE) = 512;
+    REG16(SDHI + 0x08) = 0x0100;     /* block count on: CMD12 by the host */
+    REG16(SDHI + 0x0a) = (u16)count;
+    if (sdhi_command(0x0012, sdhi_ccs ? sector : sector << 9, 0)) { /* CMD18 */
+        REG16(SDHI + 0x08) = 0;
+        return -2;
+    }
+    for (b = 0; b < count; b++) {
+        r = sdhi_wait(SD_INFO2, INFO2_READ, INFO2_ERRORS, 500);
+        if (r) {
+            REG16(SDHI + 0x08) = 0x0001; /* stop */
+            REG16(SDHI + 0x08) = 0;
+            return -(int)(0x100 + b);
+        }
+        REG16(SD_INFO2) = (u16)~INFO2_READ;
+        for (i = 0; i < 256; i++) {
+            u16 w = REG16(SD_DATA);
+            out[2 * i] = (u8)(w >> 8);
+            out[2 * i + 1] = (u8)w;
+        }
+        out += 512;
+    }
+    r = sdhi_wait(SD_INFO1, INFO1_ACCESS, INFO2_ERRORS, 500);
+    REG16(SD_INFO1) = (u16)~INFO1_ACCESS;
+    REG16(SDHI + 0x08) = 0;
+    return r ? -4 : 0;
 }
 
 int sdhi_read(u32 sector, void *buf)

@@ -63,6 +63,19 @@ void screen_fill(int x, int y, int w, int h, u8 colour);
 /* A picture of w x h pixels, one byte each, a row every `pitch` bytes,
  * at (x, y).  On the 192, x, w, pitch and the address multiples of 4
  * go a word at a time. */
+/* Per unit (hw192.c, hw193.c): whether panel_service follows the
+ * display key (not yet on the 193, whose motor lines are assumed; a
+ * program that tests the motor, examples/display, sets it), and
+ * whether the drive's port is the stock software's when a program
+ * starts (the 193: cd_eject then uses it as it is). */
+extern int display_key_followed;
+/* The 193: whether board_init sets the display unit up (1, the
+ * default), or leaves it as the software before left it (0) for
+ * screen_init to do later.  Nothing on the 192. */
+extern int board_init_display;
+void screen_init(void);
+extern const int cd_port_set_up_at_start;
+
 void screen_blit(int x, int y, int w, int h, const u8 *pixels, int pitch);
 /* Text in a 5x7 font, each dot `scale` pixels square.  Upper case,
  * digits and a little punctuation. */
@@ -77,6 +90,9 @@ const u8 *font_glyph(char c);
  * it the settings the stock software sends (among them six levels that
  * look like the lighting's) and keeps the state below up to date. */
 void panel_init(void);
+/* Called with every message from the faceplate controller (type, data,
+ * length) before the kit reads it; 0 for none. */
+extern void (*panel_frame_hook)(int type, const u8 *data, int n);
 /* Instead of panel_init: talk to the controller as it is, started and
  * with its settings, without a reset (a program started by a loader that
  * already did panel_init; the screen stays lit). */
@@ -233,6 +249,11 @@ int sd_init(int slot);
  * every command: its word, argument, response and result. */
 int sdhi_start(int slot);
 int sdhi_read(u32 sector, void *buf);
+/* count sectors with one CMD18 (the host sends CMD12 by itself). */
+int sdhi_read_multi(u32 sector, u32 count, void *buf);
+/* The clock divider after the start (0, the default, the stock
+ * software's and the fastest; 1 half that); for the next sdhi_start. */
+extern u16 sdhi_fast_clock;
 extern void (*sdhi_trace)(int cmd, u32 arg, u32 response, int result);
 /* Called over and over while sd_init waits (it takes seconds): set it
  * to panel_poll in a program that talks to the faceplate. */

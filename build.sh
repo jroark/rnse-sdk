@@ -33,11 +33,12 @@ case $unit in
     193) load=0x09b60000 size=0x100000 ;;
     *) echo "unit must be 192 or 193" >&2; exit 1 ;;
 esac
-# An example too big for that place, started by a first stage of its own
-# that loads it elsewhere (examples/aaview for aaviewer, as quakeboot
-# does for Quake): its file `place`, "LOAD SIZE" for the 192.
-if [ -f "$dir/place" ]; then
-    [ "$unit" = 192 ] || { echo "$example: the 192 only" >&2; exit 1; }
+# An example too big for the 192's place, started there by a first
+# stage of its own that loads it elsewhere (examples/aaview for
+# aaviewer, as quakeboot does for Quake): its file `place`, "LOAD SIZE",
+# for the 192 only.  On the 193 the place is 1 MiB and the example is
+# built for it as any other (the link fails if it does not fit).
+if [ -f "$dir/place" ] && [ "$unit" = 192 ]; then
     read -r load size < "$dir/place"
 fi
 objdir=out/objects-$example-$unit

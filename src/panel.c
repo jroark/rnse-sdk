@@ -58,10 +58,16 @@ static void acknowledged(void)
     setting += 2 + setting[1];
 }
 
+/* Every message from the controller, before it is looked at: its type,
+ * its data and their length (examples/keys193). */
+void (*panel_frame_hook)(int type, const u8 *data, int n);
+
 static void frame(void)
 {
     int n = rx[1] - 2, i;
     const u8 *d = rx + 2;
+    if (panel_frame_hook)
+        panel_frame_hook(rx[0], d, n);
     switch (rx[0]) {
     case 0x0f: /* started: it wants its settings (again) */
         started = 1;

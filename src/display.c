@@ -196,7 +196,7 @@ int display_follow_key(void)
 {
     int down = panel_key(KEY_DISPLAY), pressed = down && !key_down;
     key_down = down;
-    if (pressed)
+    if (pressed && display_key_followed)
         display_toggle();
     return pressed;
 }

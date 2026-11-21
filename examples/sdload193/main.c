@@ -6,11 +6,16 @@
  *   - it reports on the CAN bus through the controller as the stock
  *     software left it (mailbox 1, no reset): the kit's can_init did
  *     not work on the unit, and this did;
- *   - it reads no key and never touches the drive: the kit's faceplate
- *     code misread the unit's keys and set the drive ejecting over and
- *     over.  The disc stays in; switching the unit off and on brings the
- *     stock software back, which ejects the disc for some 25 seconds
- *     before it starts this again;
+ *   - it starts the faceplate controller, which lights the screen
+ *     (examples/panel193), and of its keys follows CD EJECT only: the
+ *     disc comes out through the drive commands examples/eject193 used
+ *     on the unit.  The display key is not followed (which motor line
+ *     opens the 193's display is still assumed).  The disc stays in
+ *     otherwise; switching the unit off and on brings the stock
+ *     software back, which ejects the disc for some 25 seconds before it
+ *     starts this again.  (Before 2026-11-20 evening the kit's faceplate
+ *     start drove the faceplate port's other lines low and set the drive
+ *     ejecting over and over; fixed in src/hw193.c.);
  *   - it starts the unit again after a minute without a program.
  *
  * The card is read through the chip's SD host (src/hw193.c, sdhi_*),
@@ -29,6 +34,7 @@
  *              slot, plus 0x10 for LINKBENC.BIN
  *   0x75 0     CRC-32 of what was loaded, then the program is started
  *   0x76 n     the n-th round without a program
+ *   0x79 0     CD EJECT pressed: the eject's result (0 done)
  *   0xff 0xff  no program in a minute: the unit starts again */
 #include "rnse.h"
 
@@ -81,6 +87,73 @@ static void step(int s)
     say(0x55, (u8)s, 0, 0);
 }
 
+/* The drive's status with a counted wait for the bits to clear. */
+static int clear(u8 bits)
+{
+    u32 n;
+    for (n = 0; n < 20000000; n++)
+        if (!(cd_alt_status() & bits))
+            return 0;
+    return -1;
+}
+
+/* One packet command without data, as examples/probe193 and eject193
+ * sent it on the unit. */
+static int packet(const u8 *command)
+{
+    int i;
+    if (clear(0x80))
+        return 1;
+    cd_reg_write(6, 0xa0);
+    if (clear(0x88))
+        return 2;
+    cd_reg_write(1, 0x00);
+    cd_reg_write(4, 0x00);
+    cd_reg_write(5, 0x08);
+    cd_reg_write(7, 0xa0);
+    cd_alt_status();
+    if (clear(0x80))
+        return 3;
+    if (!(cd_alt_status() & 0x08))
+        return 0x100 | cd_reg_read(1);
+    for (i = 0; i < 12; i += 2)
+        cd_data_write((u16)(command[i] << 8 | command[i + 1]));
+    cd_alt_status();
+    if (clear(0x80))
+        return 4;
+    if (cd_reg_read(7) & 0x01)
+        return 0x100 | cd_reg_read(1);
+    return 0;
+}
+
+/* The faceplate answered (and with it the screen's lighting), and CD
+ * EJECT followed; called wherever this waits, sd_load's reads too. */
+static void service(void)
+{
+    static const u8 allow_removal[12] = { 0x1e, 0, 0, 0, 0 };
+    static const u8 eject[12] = { 0x1b, 1, 0, 0, 2 };
+    static int was;
+    int down, r;
+    panel_poll();
+    down = panel_key(KEY_CD_EJECT);
+    if (down && !was) {
+        r = packet(allow_removal);
+        if (r == 0)
+            r = packet(eject);
+        say(0x79, 0, (u32)r, 0);
+    }
+    was = down;
+}
+
+static void wait_ms(u32 ms)
+{
+    u32 end = millis() + ms;
+    while ((s32)(millis() - end) < 0) {
+        service();
+        cpu_idle();
+    }
+}
+
 static void sd_said(int cmd, u32 arg, u32 response, int result)
 {
     if (cmd >= 0x100) {
@@ -124,7 +197,11 @@ int main(void)
     say(0x55, 0xff, millis(), 0);
     console_puts("\nrnse sdk: sdload193\n");
     screen_palette(1, 255, 255, 255);
-    screen_text(16, 16, "SD LOADER 193: RNSE.BIN FROM A CARD", 1, 2);
+    screen_text(16, 16, "SD LOADER 193: LINKBENC.BIN OR RNSE.BIN", 1, 2);
+    screen_text(16, 48, "SLOT 2, THEN SLOT 1.  CD EJECT WORKS", 1, 2);
+    panel_init();
+    sd_idle = service;
+    wait_ms(500); /* the faceplate's start and the lighting */
 
     sdhi_trace = sd_said;
     for (round = 0; round < 30; round++) {
@@ -144,15 +221,15 @@ int main(void)
             }
             if (r == 0) {
                 say(0x75, 0, crc32(BUFFER, size), 0);
-                screen_text(16, 48, "STARTING RNSE.BIN", 1, 2);
-                delay_ms(100);
+                screen_text(16, 80, "STARTING THE PROGRAM", 1, 2);
+                wait_ms(100);
                 r = run_image(BUFFER, size);
                 say(0x75, 1, (u32)r, 0); /* only when it was no program */
             }
             sdhi_trace = sd_said;
         }
         say(0x76, (u8)round, millis(), 0);
-        delay_ms(2000);
+        wait_ms(2000);
     }
     say(0xff, 0xff, millis(), 0);
     restart();
