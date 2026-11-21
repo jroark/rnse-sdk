@@ -31,3 +31,5 @@ first193 193
 probe193 193
 sdload193 193
 panel193 193
+slot193 193
+sdcheck193 193

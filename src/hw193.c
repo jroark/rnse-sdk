@@ -703,10 +703,14 @@ int sdhi_start(int slot)
     REG16(SD_MASK1) = 0xffff;        /* no interrupts: polled */
     REG16(SD_MASK2) = 0xffff;
     REG16(SDHI + 0xb2) = 0xffff;
+    /* Select 0 is the unit's physical slot 2, 1 is slot 1 (examples/
+     * slot193 on the bench, 2026-11-20).  The switch takes time: with
+     * 10 ms the first commands still reached the slot selected before;
+     * 20 ms was enough on the unit, 50 is given. */
     REG16(SD_SELECT) = (u16)(slot & 1);
     sdhi_clock = 0x0020;             /* slow while the card starts, as stock */
     REG16(SD_CLK) = 0;
-    delay_ms(10);
+    delay_ms(50);
     sdhi_command(0x0000, 0, 0);      /* CMD0 */
     e = sdhi_command(0x0008, 0x1aa, &r); /* CMD8: version 2 if it answers */
     v2 = e == 0 && (r & 0xfff) == 0x1aa;
