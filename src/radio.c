@@ -95,6 +95,8 @@ static int frame(u8 *data, int max, int *n, u32 ms)
  * for the acknowledgement (radio_command throws away whatever it finds
  * waiting): some 6 ms of the line at most, so that panel_service can do
  * it between two blocks of sound.  The first call sends at once. */
+int radio_keepalive_off;
+
 void radio_keepalive(void)
 {
     /* The 192: 81 [06] once a minute.  The 193: 8a every 30 s, which is
@@ -111,7 +113,12 @@ void radio_keepalive(void)
     u16 control;
     u32 start;
     int i;
-    if (sent && millis() - last < (ON_192 ? 60000u : 30000u))
+    /* Not on the 193: every build that sent it a frame of this kind
+     * (81 [06], then 8a) left a bench 193 with screen, faceplate and keys
+     * dark from that moment; the builds that sent none kept it lit
+     * (2026-11-21).  What a 193 wants against its restart after some
+     * nine and a half minutes is still to be found. */
+    if (!ON_192 || radio_keepalive_off || (sent && millis() - last < 60000u))
         return;
     sent = 1;
     last = millis();
@@ -129,6 +136,45 @@ void radio_keepalive(void)
     while (!(UART(0x08) & 0x0004) && millis() - start < 20)
         ;
     UART(0x04) = control;
+}
+
+/* A frame to the radio processor as it is (start byte, command, length,
+ * data and checksum already in it), the transmitter on only for it, as
+ * the stock software sends; nothing waited for. */
+static void send_raw(const u8 *frame, int n)
+{
+    u16 control = UART(0x04);
+    u32 start;
+    int i;
+    UART(0x08) = UART(0x08) & 0xffc7;
+    UART(0x04) = (u16)((control | 0x0030) & ~0x00c4);
+    for (i = 0; i < n; i++) {
+        start = millis();
+        while ((UART(0x08) & 0x0200) && millis() - start < 20)
+            ;
+        put_byte(frame[i]);
+    }
+    start = millis();
+    while (!(UART(0x08) & 0x0004) && millis() - start < 20)
+        ;
+    UART(0x04) = control;
+}
+
+/* The acknowledgement the radio processor gives our settings, 20 [00],
+ * given back for a frame of its own (it sends its status again and again
+ * while nobody does, a 193 seen 2026-11-21). */
+void radio_ack(void)
+{
+    static const u8 ack[6] = { 0x01, 0x20, 0x00, 0x01, 0x00, 0xdd };
+    send_raw(ack, 6);
+}
+
+/* A frame the radio processor sends unasked (a key on it, its status
+ * after a change): its command, its data stored, -1 when none came
+ * within ms.  The line as it is; nothing is sent. */
+int radio_listen(u8 *data, int max, int *n, u32 ms)
+{
+    return frame(data, max, n, ms);
 }
 
 /* The command number of the last answer: the command's own, or 0x20

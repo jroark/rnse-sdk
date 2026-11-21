@@ -344,16 +344,20 @@ void firmware_guard(u32 arg);
  * with its data; the answer's data goes to `answer` and its length is
  * returned, negative when no answer came in three tries. */
 int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max);
+/* A frame the radio processor sends unasked: its command (-1: none within
+ * ms), its data in data (n of them, at most max). */
+int radio_listen(u8 *data, int max, int *n, u32 ms);
+/* 20 [00] to the radio processor: its frame taken. */
+void radio_ack(void);
 /* The radio processor's keep-alive, 81 [06], as the stock software sends
  * it once a minute: without it a unit restarts into the stock software
  * after about seven minutes.  Call it often (panel_service does): it
  * sends at the first call and then when a minute has passed, and takes
- * some 6 ms when it does.  On the 193 the frame is 8a every 30 s, as
- * its software sends it (its 81 [06] is part of its start, and to a
- * running 193 it switched screen and faceplate off); whether that is
- * what a 193 needs is yet to be seen (one restarted after some nine and
- * a half minutes with neither). */
+ * some 6 ms when it does.  192 only: on a bench 193 every such frame
+ * (81 [06], 8a) turned screen, faceplate and keys off (2026-11-21). */
 void radio_keepalive(void);
+/* Set, radio_keepalive sends nothing (for finding out what a unit wants). */
+extern int radio_keepalive_off;
 #define RADIO_CD 1
 #define RADIO_TUNER 3
 #define RADIO_DECODER 4
