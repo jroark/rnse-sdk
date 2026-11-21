@@ -11,7 +11,7 @@ license = "MIT"
 publish = false
 
 [dev-dependencies]
-rnse = { git = "https://github.com/jroark/rnse", rev = "0e3a2d4ce5941161e17ff4816126281fbcf80088" }
+rnse = { git = "https://github.com/jroark/rnse", rev = "b4446e046df0f11cefa7ebd1e8392b268abaf01c" }
 
 [profile.release]
 opt-level = 3

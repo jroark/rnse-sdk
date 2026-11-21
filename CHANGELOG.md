@@ -3,10 +3,12 @@
 Changes to what other repositories depend on (CLAUDE.md, "Interfaces
 other repositories depend on"); releases are tagged.
 
-## Unreleased (branch bench-193)
+## v0.3.0
 
-Additions, and the 193 as measured on a unit; nothing that builds for
-the 192 changes.
+Additions, and the 193 as measured on a unit (rnse's
+docs/hardware-193.md, "On the bench 193"); nothing that builds for the
+192 changes.  The tests are pinned to an emulator that models the bench
+193 (rnse b4446e0).
 
 - `include/rnse.h`: `sdhi_start`, `sdhi_read`, `sdhi_read_multi`,
   `sdhi_fast_clock`, `sdhi_trace` (the 193's SD host; stubs on the 192);
@@ -26,6 +28,12 @@ the 192 changes.
 - `src/hw193.c`: board_init, the faceplate's reset line and the SD host
   as on the bench 193 (read-modify-writes where the stock software does
   them).
+- `image_enter` works on the 193 too: every interrupt source masked, the
+  timers stopped and the image written back from the cache with the
+  watchdog strobed (rnse-linux's `linuxboot` for the 193).
+- Examples for the 193: `sdload193` (the SD loader disc: starts
+  `RNSE.BIN` from a card, follows CD EJECT), `first193`, `probe193`, `keys193`, `du193`,
+  `eject193`, `panel193`, `slot193`, `sdcheck193`, `speed193`.
 
 ## v0.2.0
 
