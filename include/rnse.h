@@ -348,8 +348,11 @@ int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max);
  * it once a minute: without it a unit restarts into the stock software
  * after about seven minutes.  Call it often (panel_service does): it
  * sends at the first call and then when a minute has passed, and takes
- * some 6 ms when it does.  Both units (a 193 restarted after some
- * nine and a half minutes without it). */
+ * some 6 ms when it does.  On the 193 the frame is 8a every 30 s, as
+ * its software sends it (its 81 [06] is part of its start, and to a
+ * running 193 it switched screen and faceplate off); whether that is
+ * what a 193 needs is yet to be seen (one restarted after some nine and
+ * a half minutes with neither). */
 void radio_keepalive(void);
 #define RADIO_CD 1
 #define RADIO_TUNER 3

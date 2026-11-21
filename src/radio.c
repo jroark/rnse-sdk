@@ -97,24 +97,28 @@ static int frame(u8 *data, int max, int *n, u32 ms)
  * it between two blocks of sound.  The first call sends at once. */
 void radio_keepalive(void)
 {
-    static const u8 frame[6] = { 0x01, 0x81, 0x00, 0x01, 0x06, 0x76 };
+    /* The 192: 81 [06] once a minute.  The 193: 8a every 30 s, which is
+     * what its software sends over and over (V575 10AA in the emulator:
+     * at 0.3, 3.5 and 33.5 s); its 81 [06] comes once, early in its
+     * start, and sent to a running bench 193 it put the unit in a state
+     * with screen, faceplate and keys dark (2026-11-21). */
+    static const u8 frame192[6] = { 0x01, 0x81, 0x00, 0x01, 0x06, 0x76 };
+    static const u8 frame193[5] = { 0x01, 0x8a, 0x00, 0x00, 0x74 };
+    const u8 *frame = ON_192 ? frame192 : frame193;
+    int n = ON_192 ? 6 : 5;
     static u32 last;
     static int sent;
     u16 control;
     u32 start;
     int i;
-    /* (The 193 too: its software sends the same frame once a minute,
-     * and a bench 193 running the Android Auto viewer, which sent it
-     * nothing, restarted into the stock software after some nine and a
-     * half minutes, 2026-11-21.) */
-    if (sent && millis() - last < 60000)
+    if (sent && millis() - last < (ON_192 ? 60000u : 30000u))
         return;
     sent = 1;
     last = millis();
     control = UART(0x04);
     UART(0x08) = UART(0x08) & 0xffc7;
     UART(0x04) = (u16)((control | 0x0030) & ~0x00c4);
-    for (i = 0; i < 6; i++) {
+    for (i = 0; i < n; i++) {
         start = millis();
         while ((UART(0x08) & 0x0200) && millis() - start < 20)
             ;
