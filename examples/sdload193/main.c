@@ -363,6 +363,16 @@ int main(void)
     line(1, "RETURN: RUN AGAIN.  HELD 2 S: STOCK.  CAN PUSH: READY", 1);
     screen_text(16, screen_height - 24, "KEY BY THE POWER BUTTON: DISPLAY.  CD EJECT: DISC OUT", 2, text_scale);
     panel_init();
+    /* The faceplate's start answered before any card is touched, as the
+     * first loaders did (they stayed lit on a bench 193; one that started
+     * its cards at once left the front dark for good). */
+    {
+        u32 t = millis();
+        while (millis() - t < 600) {
+            panel_service();
+            cpu_idle();
+        }
+    }
     sd_idle = idle;
     display_idle = idle;
     can_attach();
