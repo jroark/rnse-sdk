@@ -195,7 +195,20 @@ int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max)
 int radio_source(int source, int volume)
 {
     u8 d[9] = { 0x08, (u8)source, (u8)volume, 0, 0, 0, 0, 0x01, 0x03 }, a[4];
-    return radio_command(0x81, d, 9, a, sizeof a) < 0 ? -1 : 0;
+    if (radio_command(0x81, d, 9, a, sizeof a) < 0)
+        return -1;
+    /* The 193's software follows the decoder's source with 81 [0a 0d]
+     * before it starts its sound interface (an MP3 file from a card,
+     * V575 1050 in the emulator), and the tuner's with 81 [0a 02]: by
+     * the look of it the amplifier's input, the chip's digital one or
+     * the tuner's.  Without it a bench 193 left on FM played nothing of
+     * the interface's (2026-11-21). */
+    if (!ON_192 && source == RADIO_DECODER) {
+        static const u8 route[2] = { 0x0a, 0x0d };
+        if (radio_command(0x81, route, 2, a, sizeof a) < 0)
+            return -1;
+    }
+    return 0;
 }
 
 int radio_volume(int volume)
