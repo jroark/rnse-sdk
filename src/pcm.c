@@ -191,7 +191,29 @@ int pcm_start(int n)
 {
     u32 i, count = sizeof program / sizeof program[0];
     if (screen_width != 400) {
-        /* The 193: one output, whatever n says. */
+        /* The 193: one output, whatever n says.  First the audio
+         * block's set-up as the stock software makes it once at its
+         * start (seen in the emulator, V575, right after its port
+         * set-up): the clock generator's 0x3c00 and select 0x12, a key
+         * and two enable bits at 0xff9900b8 (module clocks, by the look
+         * of it), and the blocks at 0xff986000 and 0xff985000.  A
+         * program started after the stock loader's bring-up cannot
+         * count on finding them so: on the bench 193 the interface
+         * stayed idle (status bit 25) without them, its DMA loaded
+         * and waiting (2026-11-21).  The port lines the software sets
+         * there too (0xff909000/4) are left alone. */
+        REG32(AUDIO_CLOCK) = 0x3c00;
+        REG16(0xff973000) = 0x0012;
+        REG32(0xff900864) = 0xf0a50f5a;
+        REG32(0xff9900b8) |= 0x40;
+        REG32(0xff986000) = 0x0009d533;
+        REG32(0xff9900b8) |= 0x20;
+        REG32(0xff985000) = 0x00091100;
+        REG32(0xff986010) = 1;
+        REG32(0xff986014) = 0x20;
+        REG32(0xff986018) = 0x20;
+        REG32(0xff986008) = 0;
+        REG32(0xff986004) = 0;
         pcm_stop();
         REG32(ADMA_COMMON + 0x18) &= ~(u32)(ADMA_BIT | ADMA_BIT << 1);
         adma_halt();
