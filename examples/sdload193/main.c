@@ -34,6 +34,15 @@
  *              slot, plus 0x10 for LINKBENC.BIN
  *   0x75 0     CRC-32 of what was loaded, then the program is started
  *   0x76 n     the n-th round without a program
+ *   0xe0 b     before board_init, the display unit as the stock
+ *              software left it: block b (0 0xfff80000, 1 0xfff90000),
+ *              the word, its offset; 0xe1 b the same after 8 s of the
+ *              pattern below
+ *   0x7b p     a plane the stock software shows: p its mode (second:
+ *              its position), 0x10+p its surface (second: its stride),
+ *              0x20+p its width and height; a pattern is written into
+ *              it and kept 8 s (the kit's own set-up comes after)
+ *   0x7a 0     the kit's own display set-up done
  *   0x79 0     CD EJECT pressed: the eject's result (0 done)
  *   0xff 0xff  no program in a minute: the unit starts again */
 #include "rnse.h"
@@ -180,6 +189,77 @@ static u32 crc32(const u8 *p, u32 n)
     return ~c;
 }
 
+/* ---- the display unit as the stock software leaves it -------------- */
+
+#define DU 0xfff80000
+
+/* Words of the display unit, each a record (test, 0 or 1 for the block
+ * at 0xfff80000 or 0xfff90000, the word, its offset), a little room
+ * on the bus between them for the logger. */
+static void du_words(u8 test, u8 block, u32 from, u32 to)
+{
+    u32 o, n;
+    for (o = from; o <= to; o += 4) {
+        say(test, block, REG32((block ? 0xfff90000 : DU) + o), o);
+        for (n = 0; n < 4000; n++)
+            __asm__ volatile("nop");
+    }
+}
+
+static void du_dump(u8 test)
+{
+    u32 p;
+    du_words(test, 0, 0x000, 0x0fc);          /* the control registers */
+    for (p = 1; p <= 8; p++)                   /* the planes */
+        du_words(test, 0, 0x100 * p, 0x100 * p + 0x50);
+    du_words(test, 0, 0xa100, 0xa150);         /* two blocks the OS clears */
+    du_words(test, 0, 0xa200, 0xa250);
+    for (p = 1; p <= 4; p++)                   /* the palettes' first words */
+        du_words(test, 0, 0x1000 * p, 0x1000 * p + 0x0c);
+    du_words(test, 1, 0x00, 0x10);
+}
+
+/* Each plane the display shows (DPPR, +0x18: a nibble a position, bit
+ * 3 shown, the low bits the plane less one): its mode, stride, size
+ * and surface said (0x7b), and a pattern written into the middle of
+ * its surface through the uncached window, 8 or 16 bits a pixel by
+ * the mode's low bits, as the emulated stock software sets them. */
+static void stock_planes(void)
+{
+    u32 dppr = REG32(DU + 0x18), pos;
+    for (pos = 0; pos < 8; pos++) {
+        u32 nib = dppr >> (4 * pos) & 0xf, p, mode, stride, w, h, addr, x, y, bpp;
+        if (!(nib & 8))
+            continue;
+        p = (nib & 7) + 1;
+        mode = REG32(DU + 0x100 * p);
+        stride = REG32(DU + 0x100 * p + 0x04) & 0xfff;
+        w = REG32(DU + 0x100 * p + 0x10) & 0xfff;
+        h = REG32(DU + 0x100 * p + 0x14) & 0xfff;
+        addr = REG32(DU + 0x100 * p + 0x20);
+        say(0x7b, (u8)p, mode, (u16)pos);
+        say(0x7b, (u8)(0x10 + p), addr, (u16)stride);
+        say(0x7b, (u8)(0x20 + p), w << 16 | h, 0);
+        bpp = (mode & 3) ? 2 : 1;
+        if (addr < 0x08000000 || addr >= 0x10000000 || stride == 0 || stride > 2048 || h == 0)
+            continue;
+        for (y = h / 4; y < h * 3 / 4 && y < 600; y++) {
+            for (x = (w ? w : stride) / 4; x < (w ? w : stride) * 3 / 4 && x < stride; x++) {
+                u32 a = (addr | 0xa0000000) + (y * stride + x) * bpp;
+                u32 band = x * 4 / (w ? w : stride);
+                if (bpp == 2) {
+                    static const u16 c[4] = { 0xf800, 0x07e0, 0x001f, 0xffff };
+                    REG16(a) = (y & 16) ? c[band & 3] : 0xffff;
+                } else {
+                    REG8(a) = (u8)((y & 16) ? band * 60 + 15 : 255);
+                }
+            }
+            if (!(y & 31))
+                service();
+        }
+    }
+}
+
 int main(void)
 {
     u32 sr, size = 0, round;
@@ -189,18 +269,30 @@ int main(void)
     /* What the stock software had queued on the bus is taken back. */
     REG32(CAN + 0x28) = 0xfffffffe;
     say(0x70, 0, sr, 0);
+    /* The display unit as the stock software left it, before anything
+     * here touches it (on the bench 193 nothing the kit drew showed:
+     * 2026-11-20). */
+    du_dump(0xe0);
 
     board_init_step = step;
+    board_init_display = 0; /* the stock software's picture kept for now */
     board_init();
     board_init_step = 0;
     ticking = 1;
     say(0x55, 0xff, millis(), 0);
     console_puts("\nrnse sdk: sdload193\n");
+    panel_init();
+    sd_idle = service;
+    /* Into the stock software's own planes, as it set them up. */
+    stock_planes();
+    wait_ms(8000);
+    du_dump(0xe1);
+    /* Then the kit's own picture, as before. */
+    screen_init();
+    say(0x7a, 0, millis(), 0);
     screen_palette(1, 255, 255, 255);
     screen_text(16, 16, "SD LOADER 193: LINKBENC.BIN OR RNSE.BIN", 1, 2);
     screen_text(16, 48, "SLOT 2, THEN SLOT 1.  CD EJECT WORKS", 1, 2);
-    panel_init();
-    sd_idle = service;
     wait_ms(500); /* the faceplate's start and the lighting */
 
     sdhi_trace = sd_said;

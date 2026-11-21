@@ -69,6 +69,11 @@ void screen_fill(int x, int y, int w, int h, u8 colour);
  * whether the drive's port is the stock software's when a program
  * starts (the 193: cd_eject then uses it as it is). */
 extern int display_key_followed;
+/* The 193: whether board_init sets the display unit up (1, the
+ * default), or leaves it as the software before left it (0) for
+ * screen_init to do later.  Nothing on the 192. */
+extern int board_init_display;
+void screen_init(void);
 extern const int cd_port_set_up_at_start;
 
 void screen_blit(int x, int y, int w, int h, const u8 *pixels, int pitch);

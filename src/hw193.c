@@ -411,6 +411,88 @@ int can_take(u16 *id, u8 *data)
 void (*board_init_step)(int step);
 #define STEP(n) do { if (board_init_step) board_init_step(n); } while (0)
 
+/* Whether board_init sets the display unit up the kit's way (below);
+ * 0 leaves it as the software before left it (sdload193 reads it so),
+ * and screen_init then does it later. */
+int board_init_display = 1;
+
+static void screen_init_regs(void)
+{
+    int i;
+    /* Display unit, stopped while it is set up: 832 x 496 display
+     * period in a 1056 x 525 frame, data enable 800 wide. */
+    REG32(DU + 0x00) = 0x00100000;
+    REG32(DU + 0x04) = 0x07000000;
+    REG32(DU + 0x0c) = 0x0000cb3f; /* clear every status bit */
+    REG32(DU + 0x10) = 0;          /* no interrupts from it */
+    REG32(DU + 0x14) = 0;
+    REG32(DU + 0x18) = 0x76543210; /* no plane shown yet */
+    for (i = 0x80; i <= 0x9c; i += 4)
+        REG32(DU + i) = 0;
+    REG32(0xfff90000) = 0x00100008;
+    REG32(DU + 0x40) = 0x0b5;
+    REG32(DU + 0x44) = 0x3f5;
+    REG32(DU + 0x48) = 0x018;
+    REG32(DU + 0x4c) = 0x208;
+    REG32(DU + 0x50) = 0x41f;
+    REG32(DU + 0x54) = 0x03f;
+    REG32(DU + 0x58) = 0x20c;
+    REG32(DU + 0x5c) = 0x20a;
+    REG32(DU + 0x78) = 0x0d7;
+    REG32(DU + 0x7c) = 0x320;
+    REG32(DU + 0x00) = 0x00100100; /* running */
+}
+
+static void screen_init_plane(void)
+{
+    int i;
+    STEP(9);
+    /* A black picture before anything shows. */
+    REG32(SURFACE | 0xa0000000) = 0;
+    STEP(91);
+    for (i = 0; i < STRIDE * 496; i += 4) {
+        REG32((SURFACE | 0xa0000000) + i) = 0;
+        if (board_init_step && (i & 0x3fff) == 0x3ffc)
+            board_init_step(100 + (i >> 14));
+    }
+    STEP(92);
+    screen_palette(0, 0, 0, 0);
+    STEP(93);
+    for (i = 0; i < 256; i++)
+        screen_palette(i, 0, 0, 0);
+
+    /* Plane 6: 8 bits per pixel through palette 2, no transparent
+     * colour, the whole display period; the other planes off. */
+    for (i = 1; i <= 8; i++)
+        REG32(PLANE(i)) = 0;
+    REG32(PLANE(6) + 0x00) = 0x00024100;
+    REG32(PLANE(6) + 0x04) = STRIDE;
+    REG32(PLANE(6) + 0x08) = 0xff;
+    REG32(PLANE(6) + 0x10) = STRIDE;
+    REG32(PLANE(6) + 0x14) = 496;
+    REG32(PLANE(6) + 0x18) = 0;
+    REG32(PLANE(6) + 0x1c) = 0;
+    REG32(PLANE(6) + 0x20) = SURFACE;
+    REG32(PLANE(6) + 0x24) = SURFACE;
+    REG32(PLANE(6) + 0x28) = SURFACE;
+    REG32(PLANE(6) + 0x30) = 0;
+    REG32(PLANE(6) + 0x34) = 0;
+    REG32(PLANE(6) + 0x38) = 0x3ff0;
+    REG32(PLANE(6) + 0x3c) = 0x0fff;
+    REG32(PLANE(6) + 0x40) = 0;
+    REG32(PLANE(6) + 0x44) = 0;
+    REG32(PLANE(6) + 0x48) = 0;
+    REG32(PLANE(6) + 0x50) = 0x400;
+    REG32(DU + 0x18) = 0x76d43210; /* plane 6 shown */
+    REG32(DU + 0x14) = 0x000f0000;
+}
+
+void screen_init(void)
+{
+    screen_init_regs();
+    screen_init_plane();
+}
+
 void board_init(void)
 {
     int i;
@@ -482,28 +564,8 @@ void board_init(void)
     REG32(WATCHDOG) = (REG32(WATCHDOG) & ~1u) | strobe;
 
     STEP(7);
-    /* Display unit, stopped while it is set up: 832 x 496 display
-     * period in a 1056 x 525 frame, data enable 800 wide. */
-    REG32(DU + 0x00) = 0x00100000;
-    REG32(DU + 0x04) = 0x07000000;
-    REG32(DU + 0x0c) = 0x0000cb3f; /* clear every status bit */
-    REG32(DU + 0x10) = 0;          /* no interrupts from it */
-    REG32(DU + 0x14) = 0;
-    REG32(DU + 0x18) = 0x76543210; /* no plane shown yet */
-    for (i = 0x80; i <= 0x9c; i += 4)
-        REG32(DU + i) = 0;
-    REG32(0xfff90000) = 0x00100008;
-    REG32(DU + 0x40) = 0x0b5;
-    REG32(DU + 0x44) = 0x3f5;
-    REG32(DU + 0x48) = 0x018;
-    REG32(DU + 0x4c) = 0x208;
-    REG32(DU + 0x50) = 0x41f;
-    REG32(DU + 0x54) = 0x03f;
-    REG32(DU + 0x58) = 0x20c;
-    REG32(DU + 0x5c) = 0x20a;
-    REG32(DU + 0x78) = 0x0d7;
-    REG32(DU + 0x7c) = 0x320;
-    REG32(DU + 0x00) = 0x00100100; /* running */
+    if (board_init_display)
+        screen_init_regs();
 
     STEP(8);
     /* A block the loader sets up next (0x09e389b4 and 0x09e389c6 in
@@ -522,45 +584,8 @@ void board_init(void)
         REG32(0xfe800108) = 0x00000000;
     }
 
-    STEP(9);
-    /* A black picture before anything shows. */
-    REG32(SURFACE | 0xa0000000) = 0;
-    STEP(91);
-    for (i = 0; i < STRIDE * 496; i += 4) {
-        REG32((SURFACE | 0xa0000000) + i) = 0;
-        if (board_init_step && (i & 0x3fff) == 0x3ffc)
-            board_init_step(100 + (i >> 14));
-    }
-    STEP(92);
-    screen_palette(0, 0, 0, 0);
-    STEP(93);
-    for (i = 0; i < 256; i++)
-        screen_palette(i, 0, 0, 0);
-
-    /* Plane 6: 8 bits per pixel through palette 2, no transparent
-     * colour, the whole display period; the other planes off. */
-    for (i = 1; i <= 8; i++)
-        REG32(PLANE(i)) = 0;
-    REG32(PLANE(6) + 0x00) = 0x00024100;
-    REG32(PLANE(6) + 0x04) = STRIDE;
-    REG32(PLANE(6) + 0x08) = 0xff;
-    REG32(PLANE(6) + 0x10) = STRIDE;
-    REG32(PLANE(6) + 0x14) = 496;
-    REG32(PLANE(6) + 0x18) = 0;
-    REG32(PLANE(6) + 0x1c) = 0;
-    REG32(PLANE(6) + 0x20) = SURFACE;
-    REG32(PLANE(6) + 0x24) = SURFACE;
-    REG32(PLANE(6) + 0x28) = SURFACE;
-    REG32(PLANE(6) + 0x30) = 0;
-    REG32(PLANE(6) + 0x34) = 0;
-    REG32(PLANE(6) + 0x38) = 0x3ff0;
-    REG32(PLANE(6) + 0x3c) = 0x0fff;
-    REG32(PLANE(6) + 0x40) = 0;
-    REG32(PLANE(6) + 0x44) = 0;
-    REG32(PLANE(6) + 0x48) = 0;
-    REG32(PLANE(6) + 0x50) = 0x400;
-    REG32(DU + 0x18) = 0x76d43210; /* plane 6 shown */
-    REG32(DU + 0x14) = 0x000f0000;
+    if (board_init_display)
+        screen_init_plane();
 
     STEP(10);
     /* The tick: timer 0 at a quarter of the 50 MHz peripheral clock

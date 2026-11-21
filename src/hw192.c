@@ -180,6 +180,10 @@ void display_motor(int dir)
     REG8(PORT3 + 1) = v;
 }
 
+int board_init_display = 1; /* (the 193 only) */
+void screen_init(void)
+{
+}
 int display_key_followed = 1;
 const int cd_port_set_up_at_start = 0;
 

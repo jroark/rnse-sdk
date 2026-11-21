@@ -35,3 +35,4 @@ slot193 193
 sdcheck193 193
 speed193 193
 eject193 193
+du193 193
