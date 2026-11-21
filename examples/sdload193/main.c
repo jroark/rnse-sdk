@@ -28,7 +28,8 @@
  * The card is read through the chip's SD host (src/hw193.c, sdhi_*),
  * one data line, polled.  Records on 0x7F8 (test, item, value, second):
  *
- *   0x70 0     alive (value: SR)
+ *   0x70 n     alive (value: SR; n bit 7: this build, bit 0: back from a
+ *              program)
  *   0x55 s     board_init at its step s
  *   0x71 c     an SD command (item: its word; value: argument; second:
  *              the low half of the response); 0x72 c its result and
@@ -344,7 +345,11 @@ int main(void)
     __asm__ volatile("stc sr, %0" : "=r"(sr));
     /* What the stock software had queued on the bus is taken back. */
     REG32(CAN + 0x28) = 0xfffffffe;
-    say(0x70, (u8)(returned >= 0), sr, 0);
+    /* (Item: bit 7 set marks this build, which answers the faceplate in
+     * the SD host's waits; bit 0, back from a program.  canbench --push-
+     * loader tells by it whether the loader that started is the disc's
+     * older one, to be replaced over CAN.) */
+    say(0x70, (u8)(0x80 | (returned >= 0)), sr, 0);
 
     board_init_step = step;
     board_init();

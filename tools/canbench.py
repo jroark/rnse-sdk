@@ -22,6 +22,14 @@ kit's CAN code on a unit (examples/canbench).  No packages needed.
           --script FILE        timed lines: "MS ID:HEX[@PERIOD]", "MS stop ID",
                                "MS mark TEXT" (MS from the start)
           --for S              stop after S seconds
+          --push-loader FILE   whenever an SD loader of the 193 starts that is
+                               not FILE's kind (its 0x7f8 record 0x70 without
+                               bit 7 in its item), send it FILE, a newer
+                               loader, as a program; and whenever one of
+                               FILE's kind starts afresh (item 0x80), send
+                               --push's FILE: with the disc's older loader
+                               on a unit, every start ends in the newer one
+                               and the program, no disc and no card swapped
           --push FILE          send FILE (a program's image) to the running
                                program whenever its contents change, the
                                first time at the start: the kit's canload
@@ -235,6 +243,10 @@ def run(argv):
     nm = None
     nm_due = []          # (time, data) of our ring messages
     push_path = None
+    loader_path = None
+    loader_due = None    # 'loader' or 'program': what a loader's start asks for
+    loader_next = 0.0
+    tries_left = 10
     pushed = None        # the contents last taken by the unit
     push_next = 0.0      # when to look at the file (or try again)
     i = 0
@@ -270,9 +282,18 @@ def run(argv):
         elif o == '--push':
             i += 1
             push_path = opts[i]
+        elif o == '--push-loader':
+            i += 1
+            loader_path = opts[i]
         elif o != '--listen':
             sys.exit('unknown option %s' % o)
         i += 1
+    if loader_path and push_path:
+        # Loader starts decide when the program goes out, not this start.
+        try:
+            pushed = open(push_path, 'rb').read()
+        except OSError:
+            pass
     bus = Slcan(dev, listen)
     log = Log(path)
     log.note('CANable %s, %s' % (bus.version, 'listen only' if listen else 'acknowledging'))
@@ -343,6 +364,26 @@ def run(argv):
     try:
         while stop_at is None or log.t() < stop_at:
             now = log.t()
+            if loader_due and now >= loader_next:
+                what, loader_due = loader_due, None
+                path = loader_path if what == 'loader' else push_path
+                try:
+                    image = open(path, 'rb').read() if path else None
+                except OSError:
+                    image = None
+                if image:
+                    result = push(image)
+                    log.note('PUSH %s (%s at a loader start): %s' % (path, what, result))
+                    if result.endswith('started'):
+                        if what == 'program':
+                            pushed = image
+                        tries_left = 10
+                    elif tries_left > 0:
+                        # Not taken (the loader busy at its slots, say):
+                        # again in two seconds, ten times at most.
+                        tries_left -= 1
+                        loader_due, loader_next = what, log.t() + 2
+                now = log.t()
             if push_path and now >= push_next:
                 push_next = now + 1
                 try:
@@ -378,6 +419,11 @@ def run(argv):
                 send(0x400 | nm, nm_due.pop(0)[1])
             for fid, d in bus.frames(0.005):
                 log.frame('rx', fid, d)
+                if loader_path and fid == 0x7f8 and len(d) == 8 and d[0] == 0x70:
+                    if not d[1] & 0x80:
+                        loader_due = 'loader'
+                    elif d[1] == 0x80 and push_path:
+                        loader_due = 'program'
                 if nm is not None and 0x400 <= fid <= 0x43f and len(d) >= 2 and fid != 0x400 | nm:
                     sender = fid & 0x3f
                     if d[0] == nm and d[1] & 0x03 == 0x02:
