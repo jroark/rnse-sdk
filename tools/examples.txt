@@ -36,3 +36,4 @@ sdcheck193 193
 speed193 193
 eject193 193
 du193 193
+keys193 193

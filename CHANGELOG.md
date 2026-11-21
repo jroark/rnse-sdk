@@ -14,6 +14,12 @@ the 192 changes.
   `cd_port_set_up_at_start` (per unit: on the 193 `panel_service` does
   not follow the display key, whose motor lines are still assumed, and
   `cd_eject` uses the drive's port as the stock software set it up).
+- `include/rnse.h`: `panel_frame_hook` (every faceplate message, before
+  the kit reads it; examples/keys193); `board_init_display` and
+  `screen_init` (the 193: leave the display unit as the software before
+  left it, set it up later).
+- The 193 draws through a 16-bit plane (RGB555) with a palette of its
+  own; the kit's drawing stays by colour index.
 - `build.sh`: an example's `place` file applies to the 192 only; on the
   193 such an example is built for the loader's 1 MiB place like any
   other (it used to be refused).

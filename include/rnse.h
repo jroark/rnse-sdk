@@ -90,6 +90,9 @@ const u8 *font_glyph(char c);
  * it the settings the stock software sends (among them six levels that
  * look like the lighting's) and keeps the state below up to date. */
 void panel_init(void);
+/* Called with every message from the faceplate controller (type, data,
+ * length) before the kit reads it; 0 for none. */
+extern void (*panel_frame_hook)(int type, const u8 *data, int n);
 /* Instead of panel_init: talk to the controller as it is, started and
  * with its settings, without a reset (a program started by a loader that
  * already did panel_init; the screen stays lit). */
