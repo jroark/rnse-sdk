@@ -190,11 +190,16 @@ int adc_convert(int input)
 
 void panel_port_init(void)
 {
+    /* Only the reset line (bit 1 of +4) is this code's, as with the
+     * stock software (0x8054fc7c in V5751050: bit 1 low, then high);
+     * the port's other lines are left as they are.  The kit used to
+     * write whole values here (0, 0xc0000000; 0, 1), copied from the
+     * emulator, where the reads before them return 0: on the bench 193
+     * the port reads 0xdfffffff/0xfffffffb, so that drove nearly all
+     * its lines low, and the drive went on ejecting and loading
+     * (2026-11-20). */
     REG16(SCIF_FP + 0x08) = 0;      /* port off */
-    REG32(PORT_FP + 4) = 0;         /* controller in reset */
-    REG32(PORT_FP + 0) = 0;
-    REG32(PORT_FP + 0) = 0xc0000000;
-    REG32(PORT_FP + 4) = 1;
+    REG32(PORT_FP + 4) &= ~2u;      /* controller in reset */
     REG16(SCIF_FP + 0x18) = 0;
     REG16(SCIF_FP + 0x18) = 0x0006; /* both FIFOs held empty */
     REG16(SCIF_FP + 0x10) = REG16(SCIF_FP + 0x10) & 0x0060;

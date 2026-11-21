@@ -30,3 +30,4 @@ tuner 192 193
 first193 193
 probe193 193
 sdload193 193
+panel193 193
