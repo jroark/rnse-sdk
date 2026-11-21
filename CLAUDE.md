@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A kit for writing software of one's own for the Audi RNS-E navigation unit (Aisin AW, SH-4 CPU): C, built with an SH-4 GCC by `./build.sh 192|193 [example]`. It was split out of the emulator's repository, `rnse` (https://github.com/jroark/rnse), with its history; the emulator is what its tests run the programs on. Both models are covered: the 192 (SH7750R, variants `V220`/`V222`) and the 193 (SH7770-family, `V574`/`V575`/`VB48`).
+A kit for writing software of one's own for the Audi RNS-E navigation unit (Aisin AW, SH-4 CPU): C, built with an SH-4 GCC by `./build.sh 192|193 [example]`. It was split out of the emulator's repository, `rnse` (https://github.com/jroark/rnse), with its history; the emulator is what its tests run the programs on. Both models are covered: the 192 (SH7750R, variants `V220`/`V222`) and the 193 (a Renesas R8A77730, SH-Navi family, `V574`/`V575`/`VB48`).
 
 Firmware is copyrighted and must never be committed. `.gitignore` blocks `*.iso`, `*.bin`, `*.KWI`, `*.MOT`, `/firmware/`, `/out/`; do not add firmware-derived files (flash dumps, extracted modules, SD card images) to the repository under other names either.
 Never commit the products of `build.sh` (`out/`), card images, disc images or boot ROM dumps.

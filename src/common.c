@@ -127,10 +127,14 @@ static char *hex8(char *p, u32 v)
     return p;
 }
 
+void (*unexpected_hook)(u32 expevt, u32 intevt, u32 spc);
+
 void unexpected(u32 expevt, u32 intevt, u32 spc)
 {
     char text[40], *p;
     const char *k;
+    if (unexpected_hook)
+        unexpected_hook(expevt, intevt, spc);
     console_puts("\nunexpected exception: EXPEVT=");
     console_hex(expevt);
     console_puts(" INTEVT=");

@@ -349,7 +349,7 @@ static int init(int which)
     u32 i;
 
     if (screen_width != 400)
-        return -1; /* the 193 has a card interface of its own, and no driver here */
+        return sdhi_start(which); /* the 193's own interface: hw193.c */
     /* The program this driver knows how to send, where it knows it. */
     if (flash_word(0x200000) != 1 || flash_word(0x200004) != 0x3800 || flash_word(0x20380c) != 2 || flash_word(0x203810) != 0x71bc)
         return -2;
@@ -556,6 +556,8 @@ static int read_sector(u32 sector, void *buf)
     int i;
     if (sd_reader)
         return sd_reader(sector, buf);
+    if (screen_width != 400)
+        return sdhi_read(sector, buf);
     if (slot < 0)
         return -1;
     /* Where in its memory the processor is to put the sector, and how
