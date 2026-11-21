@@ -114,10 +114,17 @@ void console_putc(char c)
     REG16(SCFSR) &= (u16)~0x0060;
 }
 
+/* The display unit's 8-bits-through-a-palette plane did not show on the
+ * bench 193 (the picture came out a flat light grey, 2026-11-21), while
+ * 16-bit planes showed their colours exactly (the loader's stripes).
+ * So the 193 draws a 16-bit plane (RGB555, the display unit's format 2,
+ * as the stock software's planes), and keeps a palette of its own: the
+ * kit's drawing stays by colour index, each index an RGB555 word here. */
+static u16 pal555[256];
+
 void screen_palette(int index, u8 r, u8 g, u8 b)
 {
-    /* The plane uses the second of the four palettes. */
-    REG32(PALETTE(2) + 4 * (index & 255)) = (u32)r << 16 | (u32)g << 8 | b;
+    pal555[index & 255] = (u16)(((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3));
 }
 
 void screen_pixel(int x, int y, u8 colour)
@@ -125,7 +132,27 @@ void screen_pixel(int x, int y, u8 colour)
     if (x < 0 || y < 0 || x >= screen_width || y >= screen_height)
         return;
     /* Through the uncached window, so that the display unit sees it. */
-    REG8((SURFACE | 0xa0000000) + (TOP + y) * STRIDE + LEFT + x) = colour;
+    REG16((SURFACE | 0xa0000000) + ((TOP + y) * STRIDE + LEFT + x) * 2) = pal555[colour];
+}
+
+/* A row (or rows) of colour-index pixels, each to its RGB555, faster
+ * than a pixel at a time (the video, examples aaviewer).  Overrides the
+ * weak one in common.c. */
+void screen_blit(int x, int y, int w, int h, const u8 *pixels, int pitch)
+{
+    int i, j;
+    for (j = 0; j < h; j++) {
+        int yy = y + j;
+        volatile u16 *out;
+        if (yy < 0 || yy >= screen_height)
+            continue;
+        out = (volatile u16 *)((SURFACE | 0xa0000000) + ((TOP + yy) * STRIDE + LEFT + x) * 2);
+        for (i = 0; i < w; i++) {
+            int xx = x + i;
+            if (xx >= 0 && xx < screen_width)
+                out[i] = pal555[pixels[j * pitch + i]];
+        }
+    }
 }
 
 /* The faceplate controller: a serial port with FIFO at 0xff926000, and
@@ -450,10 +477,10 @@ static void screen_init_plane(void)
     /* A black picture before anything shows. */
     REG32(SURFACE | 0xa0000000) = 0;
     STEP(91);
-    for (i = 0; i < STRIDE * 496; i += 4) {
+    for (i = 0; i < STRIDE * 496 * 2; i += 4) {
         REG32((SURFACE | 0xa0000000) + i) = 0;
-        if (board_init_step && (i & 0x3fff) == 0x3ffc)
-            board_init_step(100 + (i >> 14));
+        if (board_init_step && (i & 0x7ffc) == 0x7ffc)
+            board_init_step(100 + (i >> 15));
     }
     STEP(92);
     screen_palette(0, 0, 0, 0);
@@ -461,14 +488,17 @@ static void screen_init_plane(void)
     for (i = 0; i < 256; i++)
         screen_palette(i, 0, 0, 0);
 
-    /* Plane 6: 8 bits per pixel through palette 2, no transparent
-     * colour, the whole display period; the other planes off. */
+    /* Plane 6, 16 bits a pixel (RGB555, the display unit's format 2, as
+     * the stock software's planes), the whole display period; the other
+     * planes off.  Its stride is in pixels (STRIDE), so its surface is
+     * STRIDE x 496 words.  Its transparent colour is a word this code
+     * never writes (bit 15 is always 0 here), so the picture is whole. */
     for (i = 1; i <= 8; i++)
         REG32(PLANE(i)) = 0;
-    REG32(PLANE(6) + 0x00) = 0x00024100;
+    REG32(PLANE(6) + 0x00) = 0x04000002;
     REG32(PLANE(6) + 0x04) = STRIDE;
     REG32(PLANE(6) + 0x08) = 0xff;
-    REG32(PLANE(6) + 0x10) = STRIDE;
+    REG32(PLANE(6) + 0x10) = 800;
     REG32(PLANE(6) + 0x14) = 496;
     REG32(PLANE(6) + 0x18) = 0;
     REG32(PLANE(6) + 0x1c) = 0;
@@ -481,7 +511,7 @@ static void screen_init_plane(void)
     REG32(PLANE(6) + 0x3c) = 0x0fff;
     REG32(PLANE(6) + 0x40) = 0;
     REG32(PLANE(6) + 0x44) = 0;
-    REG32(PLANE(6) + 0x48) = 0;
+    REG32(PLANE(6) + 0x48) = 0x8000;
     REG32(PLANE(6) + 0x50) = 0x400;
     REG32(DU + 0x18) = 0x76d43210; /* plane 6 shown */
     REG32(DU + 0x14) = 0x000f0000;
