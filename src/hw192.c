@@ -387,6 +387,9 @@ int can_take(u16 *id, u8 *data)
     return len;
 }
 
+/* The 193's progress hook (rnse.h); the 192's bring-up does not call it. */
+void (*board_init_step)(int step);
+
 void board_init(void)
 {
     int i;
@@ -506,3 +509,8 @@ void board_init(void)
         irq_enable();
     }
 }
+
+/* The 193's SD host (hw193.c); the 192's cards go through sd.c. */
+void (*sdhi_trace)(int cmd, u32 arg, u32 response, int result);
+int sdhi_start(int slot) { (void)slot; return -1; }
+int sdhi_read(u32 sector, void *buf) { (void)sector; (void)buf; return -1; }

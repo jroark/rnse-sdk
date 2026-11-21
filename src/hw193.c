@@ -71,8 +71,10 @@ void interrupt(void)
         /* The watchdog wants an edge on its strobe regularly; the stock
          * loader toggles it from this tick as well. */
         if (!watchdog_hold) {
+            /* Bit 0 only, read-modify-write as the stock loader does:
+             * the other pins of the port are not this code's. */
             strobe ^= 1;
-            REG32(WATCHDOG) = strobe;
+            REG32(WATCHDOG) = (REG32(WATCHDOG) & ~1u) | strobe;
         }
         display_tick();
     } else if (code == 0x880) {
@@ -396,10 +398,14 @@ int can_take(u16 *id, u8 *data)
     return len;
 }
 
+void (*board_init_step)(int step);
+#define STEP(n) do { if (board_init_step) board_init_step(n); } while (0)
+
 void board_init(void)
 {
     int i;
 
+    STEP(1);
     /* Interrupt pins and controller: priorities zero, everything
      * masked.  The first eight writes are the loader's; their meaning
      * is not known in detail. */
@@ -417,15 +423,18 @@ void board_init(void)
     REG32(INT2MSKR) = 0xffffffff;
     REG32(INT2MSKR2) = 0xffffffff;
 
+    STEP(2);
     /* Timers stopped. */
     REG8(TSTR) = 0;
     REG16(TCR0) = 0;
 
+    STEP(3);
     /* Three writes of the loader's to a block of unknown purpose. */
     REG32(0xfe00802c) = 0;
     REG32(0xfe00803c) = 0;
     REG16(0xfe008060) = 1;
 
+    STEP(4);
     /* Debug serial port: FIFOs reset, format 8N1, the loader's clock
      * settings (+0x34 and +0x30: source and divisor of the bit clock),
      * transmitter on. */
@@ -438,22 +447,31 @@ void board_init(void)
     REG16(SCFCR) = 0x0000;
     REG16(SCSCR) = 0x0022;
 
+    STEP(5);
     /* Graphics engine: reset and released; not used here. */
     REG32(0xffe80000) = 0x80000000;
     REG32(0xffe80000) = 0x00000000;
     REG32(0xffe80060) = 0x0000000e;
 
+    STEP(6);
     /* Ports: bits 3 and 4 of port A are outputs and driven high (what
      * they switch is not known; the picture may depend on them). */
-    REG32(PORT_A + 0x20) = 0;
-    REG32(PORT_A + 0x00) = 0;
-    REG32(PORT_A + 0x04) = 0x18;
-    REG32(PORT_B + 0x20) = 0;
-    REG32(PORT_B + 0x00) = 0;
-    REG32(PORT_B + 0x04) = 0;
-    REG32(PORT_A + 0x08) = 0x18;
-    REG32(WATCHDOG) = strobe = 1;
+    /* Read-modify-write of only the bits the stock loader touches
+     * (0x09e27680 in V5740002): port A bits 3-5 taken from their other
+     * functions, 3 and 4 made outputs, 5 an input; port B bit 3 an
+     * input.  Whole-register writes, as the kit made them before, would
+     * have set every other pin of these ports as well. */
+    REG32(PORT_A + 0x20) &= ~0x38u;
+    REG32(PORT_A + 0x00) &= ~0x38u;
+    REG32(PORT_A + 0x04) = (REG32(PORT_A + 0x04) | 0x18) & ~0x20u;
+    REG32(PORT_B + 0x20) &= ~0x08u;
+    REG32(PORT_B + 0x00) &= ~0x08u;
+    REG32(PORT_B + 0x04) &= ~0x08u;
+    REG32(PORT_A + 0x08) |= 0x18;
+    strobe = 1;
+    REG32(WATCHDOG) = (REG32(WATCHDOG) & ~1u) | strobe;
 
+    STEP(7);
     /* Display unit, stopped while it is set up: 832 x 496 display
      * period in a 1056 x 525 frame, data enable 800 wide. */
     REG32(DU + 0x00) = 0x00100000;
@@ -477,18 +495,35 @@ void board_init(void)
     REG32(DU + 0x7c) = 0x320;
     REG32(DU + 0x00) = 0x00100100; /* running */
 
-    /* A block the loader sets up next: a key, then three registers.
-     * Purpose not known. */
+    STEP(8);
+    /* A block the loader sets up next (0x09e389b4 and 0x09e389c6 in
+     * V5740002), presumably the memory controller's: a key, then, with
+     * interrupts masked (they are), +0x220 set from a field of +0x280
+     * as the loader computes it, twice as it does.  The kit used to
+     * write the constant 0xfffffffe there: what the computation gives
+     * when +0x280 reads 0, as it does in the emulator.  On the bench
+     * 193 that stopped the RAM within some 100 ms (probe193, 2026-11-20). */
     REG32(0xfe800100) = 0x0000a55a;
     REG32(0xfe800108) = 0x00000000;
     REG32(0xfe800110) = 0x00000004;
-    REG32(0xfe800108) = 0x00010000;
-    REG32(0xfe800220) = 0xfffffffe;
-    REG32(0xfe800108) = 0x00000000;
+    for (i = 0; i < 2; i++) {
+        REG32(0xfe800108) = 0x00010000;
+        REG32(0xfe800220) = ((((REG32(0xfe800280) & 0x7fc00) >> 10) & 0x1ff) - 2) | 0x1000;
+        REG32(0xfe800108) = 0x00000000;
+    }
 
+    STEP(9);
     /* A black picture before anything shows. */
-    for (i = 0; i < STRIDE * 496; i += 4)
+    REG32(SURFACE | 0xa0000000) = 0;
+    STEP(91);
+    for (i = 0; i < STRIDE * 496; i += 4) {
         REG32((SURFACE | 0xa0000000) + i) = 0;
+        if (board_init_step && (i & 0x3fff) == 0x3ffc)
+            board_init_step(100 + (i >> 14));
+    }
+    STEP(92);
+    screen_palette(0, 0, 0, 0);
+    STEP(93);
     for (i = 0; i < 256; i++)
         screen_palette(i, 0, 0, 0);
 
@@ -517,6 +552,7 @@ void board_init(void)
     REG32(DU + 0x18) = 0x76d43210; /* plane 6 shown */
     REG32(DU + 0x14) = 0x000f0000;
 
+    STEP(10);
     /* The tick: timer 0 at a quarter of the 50 MHz peripheral clock
      * (49.95 MHz going by the stock software's 12488 counts for its
      * 1 ms), 124876 counts = 10 ms, interrupt level 7.  (The stock
@@ -532,4 +568,192 @@ void board_init(void)
         extern void irq_enable(void);
         irq_enable();
     }
+}
+
+/* ---- The SD host interface of the chip, for the two card slots (and
+ * the SD bridge in one of them): 16-bit registers in the layout of
+ * Toshiba's and Renesas' SD hosts at 0xff90a000.  The steps and values
+ * are those of the stock driver (0x8067b9ae.. in V5751050, logged on
+ * the emulator, rnse docs/hardware-193.md "SD cards"), with two
+ * differences: it is polled, not driven by interrupts, and the bus
+ * stays one bit wide (the stock driver takes four with ACMD6; the SD
+ * bridge answers on one line only).  Sectors come through the data
+ * port by the program, not by DMA. */
+#define SDHI 0xff90a000
+#define SD_CMD (SDHI + 0x00)
+#define SD_SELECT (SDHI + 0x02)
+#define SD_ARG0 (SDHI + 0x04)
+#define SD_ARG1 (SDHI + 0x06)
+#define SD_RESP0 (SDHI + 0x0c)
+#define SD_RESP1 (SDHI + 0x0e)
+#define SD_INFO1 (SDHI + 0x1c)
+#define SD_INFO2 (SDHI + 0x1e)
+#define SD_MASK1 (SDHI + 0x20)
+#define SD_MASK2 (SDHI + 0x22)
+#define SD_CLK (SDHI + 0x24)
+#define SD_SIZE (SDHI + 0x26)
+#define SD_OPTION (SDHI + 0x28)
+#define SD_DATA (SDHI + 0x30)
+#define SD_DMA (SDHI + 0xd8)
+#define SD_RESET (SDHI + 0xe0)
+
+#define INFO1_RESPONSE 0x0001
+#define INFO1_ACCESS 0x0004
+#define INFO2_ERRORS 0x807f /* CRC, end bit, timeouts, illegal access */
+#define INFO2_TIMEOUT 0x0040
+#define INFO2_READ 0x0100   /* a block can be read from the data port */
+#define INFO2_IDLE 0x2000
+
+void (*sdhi_trace)(int cmd, u32 arg, u32 response, int result);
+static int sdhi_ccs, sdhi_slot = -1;
+static u16 sdhi_clock;
+
+static int sdhi_wait(u32 reg, u16 bits, u16 errors, u32 ms)
+{
+    u32 start = millis();
+    for (;;) {
+        u16 v = REG16(reg);
+        if (REG16(SD_INFO2) & errors)
+            return -(int)(REG16(SD_INFO2) & errors);
+        if (v & bits)
+            return 0;
+        if (millis() - start > ms)
+            return -0x10000;
+    }
+}
+
+/* One command: the clock started, argument, status cleared, the
+ * command's word (its index; 0x40 more for an application command:
+ * the host then knows the response).  0, or minus the error bits. */
+static int sdhi_command(u16 word, u32 arg, u32 *response)
+{
+    int r;
+    u32 start = millis();
+    while (!(REG16(SD_INFO2) & INFO2_IDLE))
+        if (millis() - start > 100)
+            break;
+    REG16(SD_CLK) = sdhi_clock;
+    REG16(SD_CLK) = (u16)(sdhi_clock | 0x0100);
+    REG16(SD_ARG0) = (u16)arg;
+    REG16(SD_ARG1) = (u16)(arg >> 16);
+    REG16(SD_INFO1) = (u16)~(INFO1_RESPONSE | INFO1_ACCESS);
+    REG16(SD_INFO2) = (u16)~INFO2_ERRORS;
+    REG16(SD_CMD) = word;
+    r = sdhi_wait(SD_INFO1, INFO1_RESPONSE, INFO2_ERRORS, 500);
+    REG16(SD_INFO1) = (u16)~INFO1_RESPONSE;
+    if (response)
+        *response = (u32)REG16(SD_RESP0) | (u32)REG16(SD_RESP1) << 16;
+    if (sdhi_trace)
+        sdhi_trace(word, arg, response ? *response : 0, r);
+    return r;
+}
+
+/* What the stock software does just before it starts its SD driver
+ * (0x806530e0 in V5751050), with the same values: a pin function
+ * register that takes the complement of its value first (0xff900800,
+ * then 0xff900804: bit 24 cleared, 25 and 28 set), a key, and four
+ * registers of the bus and pin blocks.  On the bench 193, locked by its
+ * PIN, the stock software never got this far, and neither it nor the kit
+ * reached a card or the SD bridge (2026-11-20).  Once is enough; each
+ * register is told to sdhi_trace (command word 0x100 + n) as it was
+ * before and after. */
+static int sdhi_pins_done;
+
+static void sdhi_pins(void)
+{
+    static const u32 regs[] = { 0xff900804, 0xff800018, 0xff80001c, 0xff800020, 0xff900840 };
+    u32 v;
+    int i;
+    if (sdhi_pins_done)
+        return;
+    sdhi_pins_done = 1;
+    for (i = 0; i < 5; i++)
+        if (sdhi_trace)
+            sdhi_trace(0x100 + i, regs[i], REG32(regs[i]), 0);
+    v = (REG32(0xff900804) & 0xfeffffffu) | 0x12000000u;
+    REG32(0xff900800) = ~v;
+    REG32(0xff900804) = v;
+    REG32(0xff900860) = 0xa55af00fu;
+    REG32(0xff800018) = 0x0ff0f00fu;
+    REG32(0xff80001c) = 0x01010101u;
+    REG32(0xff900840) = 0x01010101u;
+    REG32(0xff800020) = 0x00002200u;
+    for (i = 0; i < 5; i++)
+        if (sdhi_trace)
+            sdhi_trace(0x110 + i, regs[i], REG32(regs[i]), 0);
+}
+
+int sdhi_start(int slot)
+{
+    u32 r = 0, start;
+    int v2, e;
+    sdhi_slot = -1;
+    sdhi_pins();
+    REG16(SD_RESET) = 0;
+    REG16(SD_RESET) = 7;
+    REG16(SD_DMA) = 0;               /* the data port is the program's */
+    REG16(SD_OPTION) = 0x80d9;       /* the stock timeouts; bit 15: one data line */
+    REG16(SDHI + 0xf0) = 0x00da;
+    REG16(SDHI + 0xfc) = 0x00fc;
+    REG16(SD_MASK1) = 0xffff;        /* no interrupts: polled */
+    REG16(SD_MASK2) = 0xffff;
+    REG16(SDHI + 0xb2) = 0xffff;
+    REG16(SD_SELECT) = (u16)(slot & 1);
+    sdhi_clock = 0x0020;             /* slow while the card starts, as stock */
+    REG16(SD_CLK) = 0;
+    delay_ms(10);
+    sdhi_command(0x0000, 0, 0);      /* CMD0 */
+    e = sdhi_command(0x0008, 0x1aa, &r); /* CMD8: version 2 if it answers */
+    v2 = e == 0 && (r & 0xfff) == 0x1aa;
+    if (e && e != -INFO2_TIMEOUT)
+        return -2;
+    start = millis();
+    for (;;) {
+        if (sdhi_command(0x0037, 0, 0))                            /* CMD55 */
+            return -3;
+        if (sdhi_command(0x0069, v2 ? 0x40ff8000 : 0x00ff8000, &r)) /* ACMD41 */
+            return -4;
+        if (r & 0x80000000)
+            break;
+        if (millis() - start > 1500)
+            return -5;
+        delay_ms(20);
+    }
+    sdhi_ccs = v2 && (r & 0x40000000);
+    if (sdhi_command(0x0002, 0, 0))  /* CMD2 */
+        return -6;
+    if (sdhi_command(0x0003, 0, &r)) /* CMD3: the card's address */
+        return -7;
+    r &= 0xffff0000;
+    sdhi_clock = 0x0001;             /* faster from here (the stock 0: quarter of that divider's) */
+    if (sdhi_command(0x0007, r, 0))  /* CMD7: selected */
+        return -8;
+    if (!sdhi_ccs && sdhi_command(0x0010, 512, 0)) /* CMD16 */
+        return -9;
+    REG16(SD_SIZE) = 512;
+    sdhi_slot = slot;
+    return 0;
+}
+
+int sdhi_read(u32 sector, void *buf)
+{
+    u8 *out = buf;
+    int i, r;
+    if (sdhi_slot < 0)
+        return -1;
+    REG16(SD_SIZE) = 512;
+    if (sdhi_command(0x0011, sdhi_ccs ? sector : sector << 9, 0)) /* CMD17 */
+        return -2;
+    r = sdhi_wait(SD_INFO2, INFO2_READ, INFO2_ERRORS, 500);
+    if (r)
+        return -3;
+    REG16(SD_INFO2) = (u16)~INFO2_READ;
+    for (i = 0; i < 256; i++) {
+        u16 w = REG16(SD_DATA);
+        out[2 * i] = (u8)(w >> 8);
+        out[2 * i + 1] = (u8)w;
+    }
+    r = sdhi_wait(SD_INFO1, INFO1_ACCESS, INFO2_ERRORS, 500);
+    REG16(SD_INFO1) = (u16)~INFO1_ACCESS;
+    return r ? -4 : 0;
 }

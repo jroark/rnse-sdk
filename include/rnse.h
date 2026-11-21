@@ -23,6 +23,18 @@ typedef signed short s16;
  * display, and a 10 ms tick that also serves the watchdog.  Called once,
  * with interrupts masked; returns with them enabled. */
 void board_init(void);
+/* Called by board_init between its parts when set (1 interrupts and
+ * pins, 2 timers, 3 the unknown block at 0xfe008000, 4 the debug port,
+ * 5 the graphics engine, 6 ports and watchdog, 7 the display unit, 8
+ * the block at 0xfe800100, 9 the picture: 91 after its first word, 92 the whole picture
+ * cleared, 93 after the first palette entry; 10 the tick), for a program
+ * that has to find out where a unit stops.  Before the tick runs, so
+ * the hook must not wait on millis or micros.  193 only. */
+extern void (*board_init_step)(int step);
+/* Called first when an exception nobody expects is taken (with SR.BL
+ * set: interrupts blocked, a second exception resets the processor),
+ * for a program that has to report where a unit stopped. */
+extern void (*unexpected_hook)(u32 expevt, u32 intevt, u32 spc);
 
 /* Milliseconds since board_init, in steps of 10. */
 u32 millis(void);
@@ -216,6 +228,12 @@ int cd_find(const char *name, u32 *sector, u32 *size);
  * and must have it for whole sectors: 0, -1 a read failed, -2 no such
  * file, -3 too long. */
 int sd_init(int slot);
+/* The 193's own SD host, under sd_init and sd_read there (one data
+ * line, polled; see src/hw193.c).  sdhi_trace, when set, is told of
+ * every command: its word, argument, response and result. */
+int sdhi_start(int slot);
+int sdhi_read(u32 sector, void *buf);
+extern void (*sdhi_trace)(int cmd, u32 arg, u32 response, int result);
 /* Called over and over while sd_init waits (it takes seconds): set it
  * to panel_poll in a program that talks to the faceplate. */
 extern void (*sd_idle)(void);

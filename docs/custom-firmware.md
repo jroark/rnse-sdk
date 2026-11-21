@@ -537,7 +537,7 @@ emulated bus every 300 ms, `--can-alone` takes every other node away).
 
 | | 192 | 193 |
 |---|---|---|
-| CPU | SH7750R | SH-4A core of an SH7770-family chip |
+| CPU | SH7750R | SH-4A core of a Renesas R8A77730 (SH-Navi family) |
 | linked at | 0x8df00080 | 0x09b60080 |
 | room (code, data, stack) | 0x20000 bytes | 0x100000 bytes |
 | above that, to the end of the stock loader's image | the stock loader, packed | the same |
