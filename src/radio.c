@@ -1,4 +1,4 @@
-/* The radio processor of the 192: a second computer in the unit (an
+/* The radio processor of the 192 (and the 193's, the same way): a second computer in the unit (an
  * NEC V850 on a board of its own) that has the tuner, the amplifier
  * and the power.  The main processor talks to it on serial channel 1,
  * in frames: 0x01, a command, the length of the data in 16 bits, the
@@ -13,17 +13,38 @@
 #include "rnse.h"
 
 #define REG16(a) (*(volatile u16 *)(a))
-#define UART1 0xa7a10000
+#define REG8(a) (*(volatile u8 *)(a))
+/* The line's registers, at the 192's offsets (mode +0, bit rate +2,
+ * control +4, transmit +6, status +8, receive +0xa, FIFO control +0xc,
+ * +0xe).  The 193 has the same port at 0xff915000 with them four bytes
+ * apart, and its software moves the bytes themselves eight bits wide
+ * (rnse docs/hardware-193.md, "Serial links"; the accesses as the
+ * 193's software makes them, seen in the emulator). */
+#define ON_192 (screen_width == 400)
+#define UART(x) (*(volatile u16 *)(ON_192 ? 0xa7a10000 + (x) : 0xff915000 + 2 * (x)))
+
+static void put_byte(u8 b)
+{
+    if (ON_192)
+        REG16(0xa7a10006) = b;
+    else
+        REG8(0xff91500c) = b;
+}
+
+static int get_byte(void)
+{
+    return ON_192 ? REG16(0xa7a1000a) & 0xff : REG8(0xff915014);
+}
 
 static int getc_for(u32 ms)
 {
     u32 start = millis();
     for (;;) {
-        u16 status = REG16(UART1 + 0x08);
+        u16 status = UART(0x08);
         if (status & 0x0038) /* receive errors stop the receiver */
-            REG16(UART1 + 0x08) = status & 0xffc7;
+            UART(0x08) = status & 0xffc7;
         if (status & 0x0040)
-            return REG16(UART1 + 0x0a) & 0xff;
+            return get_byte();
         if (millis() - start >= ms)
             return -1;
     }
@@ -82,24 +103,26 @@ void radio_keepalive(void)
     u16 control;
     u32 start;
     int i;
-    if (screen_width != 400 || (sent && millis() - last < 60000))
+    /* (Not on the 193, whose programs panel_service calls this for
+     * too: whether a 193 needs it is not known.) */
+    if (!ON_192 || (sent && millis() - last < 60000))
         return;
     sent = 1;
     last = millis();
-    control = REG16(UART1 + 0x04);
-    REG16(UART1 + 0x08) = REG16(UART1 + 0x08) & 0xffc7;
-    REG16(UART1 + 0x04) = (u16)((control | 0x0030) & ~0x00c4);
+    control = UART(0x04);
+    UART(0x08) = UART(0x08) & 0xffc7;
+    UART(0x04) = (u16)((control | 0x0030) & ~0x00c4);
     for (i = 0; i < 6; i++) {
         start = millis();
-        while ((REG16(UART1 + 0x08) & 0x0200) && millis() - start < 20)
+        while ((UART(0x08) & 0x0200) && millis() - start < 20)
             ;
-        REG16(UART1 + 0x06) = frame[i];
+        put_byte(frame[i]);
     }
     /* Status bit 2: the last bit has left the line. */
     start = millis();
-    while (!(REG16(UART1 + 0x08) & 0x0004) && millis() - start < 20)
+    while (!(UART(0x08) & 0x0004) && millis() - start < 20)
         ;
-    REG16(UART1 + 0x04) = control;
+    UART(0x04) = control;
 }
 
 /* The command number of the last answer: the command's own, or 0x20
@@ -122,27 +145,25 @@ static int tries = 3;
 int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max)
 {
     int try, i, got, len = 0, silent = 0;
-    if (screen_width != 400)
-        return -1; /* the 193's radio is spoken to differently, and not from here */
     /* Three times into silence, and for two seconds against refusals. */
     for (try = 0; silent < tries && try < 20; try++) {
-        u16 control = REG16(UART1 + 0x04);
+        u16 control = UART(0x04);
         u8 sum = (u8)(0x01 + cmd + (n >> 8) + n);
         u32 start;
         /* The installed software has the transmitter on only while it
          * sends, and its interrupts are nobody's here. */
-        REG16(UART1 + 0x08) = REG16(UART1 + 0x08) & 0xffc7;
+        UART(0x08) = UART(0x08) & 0xffc7;
         while (getc_for(0) >= 0)
             ;
-        REG16(UART1 + 0x04) = (u16)((control | 0x0030) & ~0x00c4);
+        UART(0x04) = (u16)((control | 0x0030) & ~0x00c4);
         for (i = -4; i <= n; i++) {
             u8 b = i == -4 ? 0x01 : i == -3 ? cmd : i == -2 ? (u8)(n >> 8) : i == -1 ? (u8)n : i < n ? data[i] : (u8)~sum;
             if (i >= 0 && i < n)
                 sum = (u8)(sum + b);
             start = millis();
-            while ((REG16(UART1 + 0x08) & 0x0200) && millis() - start < 100)
+            while ((UART(0x08) & 0x0200) && millis() - start < 100)
                 ;
-            REG16(UART1 + 0x06) = b;
+            put_byte(b);
         }
         /* Its answer, among whatever else it has to say. */
         start = millis();
@@ -150,7 +171,7 @@ int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max)
             got = frame(answer, max, &len, patience - (millis() - start));
             if (got == cmd || (got == 0x20 && cmd != 0x20)) {
                 radio_answered = got;
-                REG16(UART1 + 0x04) = control;
+                UART(0x04) = control;
                 if (!(got == 0x20 && len && answer[0]))
                     return len;
                 radio_refusal = answer[0];
@@ -158,7 +179,7 @@ int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max)
                 break;
             }
         }
-        REG16(UART1 + 0x04) = control;
+        UART(0x04) = control;
         if (millis() - start >= patience) {
             silent++;
             continue;
@@ -231,19 +252,19 @@ int radio_start(void)
     u8 answer[64];
     u32 i;
     int silent = 0, r, before;
-    if (screen_width != 400)
-        return -1;
     /* (Register for register as the stock software's set-up, but for
-     * the receive interrupt, which nobody would take here.) */
-    REG16(UART1 + 0x04) = 0;
-    REG16(UART1 + 0x00) = 0x0000;
-    REG16(UART1 + 0x02) = 0x005f;
-    REG16(UART1 + 0x0c) = 0x0000;
-    REG16(UART1 + 0x0e) = 0x0000;
-    REG16(UART1 + 0x08) = 0x0104;
-    REG16(UART1 + 0x0c) = 0x8000;
-    REG16(UART1 + 0x0c) = 0x0000;
-    REG16(UART1 + 0x04) = 0x0018; /* the receiver; the transmitter for each frame */
+     * the receive interrupt, which nobody would take here.  The 193's
+     * software has 0x50 for the bit rate: its peripheral clock is
+     * 50 MHz, the 192's 58.8.) */
+    UART(0x04) = 0;
+    UART(0x00) = 0x0000;
+    UART(0x02) = ON_192 ? 0x005f : 0x0050;
+    UART(0x0c) = 0x0000;
+    UART(0x0e) = 0x0000;
+    UART(0x08) = 0x0104;
+    UART(0x0c) = 0x8000;
+    UART(0x0c) = 0x0000;
+    UART(0x04) = 0x0018; /* the receiver; the transmitter for each frame */
     for (i = 0; i < sizeof frames / sizeof frames[0]; i++) {
         before = radio_refusals;
         /* (0x8a is the one a unit's radio processor says nothing to:

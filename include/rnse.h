@@ -340,7 +340,7 @@ int firmware_installed(void);
 void firmware_healthy(void);
 void firmware_guard(u32 arg);
 
-/* The radio processor (192): tuner, amplifier and power.  A command
+/* The radio processor (192 and 193): tuner, amplifier and power.  A command
  * with its data; the answer's data goes to `answer` and its length is
  * returned, negative when no answer came in three tries. */
 int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max);
@@ -348,7 +348,8 @@ int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max);
  * it once a minute: without it a unit restarts into the stock software
  * after about seven minutes.  Call it often (panel_service does): it
  * sends at the first call and then when a minute has passed, and takes
- * some 6 ms when it does.  192 only. */
+ * some 6 ms when it does.  192 only (the 193's software sends it too;
+ * whether a 193 restarts without it is not known). */
 void radio_keepalive(void);
 #define RADIO_CD 1
 #define RADIO_TUNER 3
@@ -423,6 +424,13 @@ void cd_data_write(u16 w);
  * until can_receive asks; can_lost counts those there was no room for
  * or that the controller itself had to drop. */
 void can_init(void);
+/* For a program the stock software started (the SD loaders): the
+ * controller taken as that software left it, no reset, its bit timing
+ * kept, and set up to receive everything as can_init does.  On the 193,
+ * where can_init left a unit's bus silent, this is the way; on the 192
+ * it is can_init.  (On the 193, receiving this way has yet to be seen
+ * on a unit.) */
+void can_attach(void);
 /* 0 = sent and acknowledged by another node; -1 = not within 100 ms
  * (nobody else on the bus, or the bus is down), and given up. */
 int can_send(u16 id, const u8 *data, int len);
@@ -578,7 +586,15 @@ void cache_setup(u32 ccr);
  * whether it is still at it.  The samples must stay where they are
  * until then.  pcm_stop puts the processor back into reset (a card in
  * its slot wants sd_init after that).  pcm_start returns 0, or below 0
- * when the processor did not take its program (or on the 193). */
+ * when the processor did not take its program.
+ *
+ * The 193 (also src/pcm.c) has one output of its own, the serial sound
+ * interface, at 44.1 kHz into the same amplifier input (RADIO_DECODER):
+ * pcm_start (whatever dsp says) and the streams, pcm_stream with its
+ * blocks, work there; pcm_put, pcm_dma and pcm_loop return below 0.
+ * The 193 takes no interrupt for it: the ring moves on when the
+ * program calls pcm_stream_block or pcm_stream_ready, which it must do
+ * at least once a block. */
 int pcm_start(int dsp);
 int pcm_put(const s16 *lr, u32 frames);
 /* Called by pcm_put every 2048 samples, when set (to panel_service): a
@@ -607,6 +623,9 @@ int pcm_stream(s16 *buf, u32 frames, u32 blocks);
 s16 *pcm_stream_block(void);
 void pcm_stream_ready(void);
 void pcm_stream_stop(void);
+/* How often, since pcm_stream, the next block was not ready in time
+ * and a silence was heard. */
+extern u32 pcm_gaps;
 /* A sound card's way: the ring played round and round by the DMA
  * controller with nothing to say a block is ready, and pcm_loop_pos
  * the frame (0 .. frames * blocks - 1) it plays now, so that a program

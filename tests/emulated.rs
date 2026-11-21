@@ -1959,6 +1959,143 @@ fn first193_reads_the_unit_and_writes_nothing() {
     }
 }
 
+/// A program of the kit on an emulated 193, started the way the SD
+/// loader (examples/sdload193) hands over to one: at the loader's place,
+/// interrupts blocked, the watchdog left to the program.  No disc: what
+/// such a test is about is the program's own use of the hardware.  None
+/// without a cross compiler.
+fn started_as_by_the_sd_loader_193(example: &str) -> Option<Machine> {
+    use rnse::board::Model;
+    let sdk = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
+    let out = std::process::Command::new("sh").arg(sdk.join("build.sh")).args(["193", example]).output().unwrap();
+    if !out.status.success() {
+        let text = String::from_utf8_lossy(&out.stderr);
+        assert!(text.contains("gcc: not found") || text.contains("gcc: command not found"), "build: {}", text);
+        return None;
+    }
+    let program = std::fs::read(sdk.join(format!("out/{}-193.bin", example))).unwrap();
+    let mut m = Machine::for_model(Model::Rnse193);
+    m.echo_console = false;
+    m.scramble_ram();
+    m.cache_model();
+    m.install_boot_stub("V575");
+    m.board.load(0x09b6_0080, &program);
+    m.cpu.reset();
+    m.cpu.set_sr(0x7000_00f0);
+    m.cpu.pc = u32::from_be_bytes([program[0], program[1], program[2], program[3]]);
+    m.cpu.r[15] = 0x09c5_fff0;
+    m.watchdog_always = true;
+    Some(m)
+}
+
+/// The car driver on a 193 whose CAN controller the stock software set
+/// up (can_attach, which car_init uses): taken as it is, not reset (a
+/// mailbox the stock software programmed keeps its identifier), and the
+/// steering wheel's keys come in through the mailbox it sets up again.
+#[test]
+fn car_driver_attaches_to_the_193_s_controller() {
+    use rnse::dev::hcan::Frame;
+    let Some(mut m) = started_as_by_the_sd_loader_193("car") else { return };
+    // As the stock software leaves it: running, its bit timing, mailbox
+    // 24 for network management (0x400-0x43f), mailbox 5 receiving 0x271.
+    m.can().start();
+    m.can().write(0x100 + 0x20 * 24, 2, 0x400 << 2, 0);
+    m.can().write(0x100 + 0x20 * 24 + 4, 2, 0x3f << 2, 0);
+    m.can().write(0x100 + 0x20 * 24 + 0x10, 2, 0x0300, 0);
+    m.can().write(0x100 + 0x20 * 5, 2, 0x271 << 2, 0);
+    m.can().write(0x100 + 0x20 * 5 + 0x10, 2, 0x0300, 0);
+    let ms = m.cycles_per_ms();
+    let mut reports: Vec<[u8; 4]> = Vec::new();
+    let run = |m: &mut Machine, t: u64, reports: &mut Vec<[u8; 4]>| {
+        assert_eq!(m.run(t * ms), Stop::Budget, "{:?}", m.cpu.fault);
+        for f in m.can().tx.iter().filter(|f| f.id == 0x7f8 && f.len == 4) {
+            reports.push([f.data[0], f.data[1], f.data[2], f.data[3]]);
+        }
+        m.can().tx.retain(|f| f.id != 0x7f8);
+    };
+    run(&mut m, 500, &mut reports);
+    assert!(reports.contains(&[b'I', 0xff, 0, 0]), "{:?}", reports);
+    assert_eq!(m.can().read(0x100 + 0x20 * 5, 2, 0), 0x271 << 2, "the controller was reset");
+    let press = |m: &mut Machine, code: u8| m.can_send_cyclic(Frame::new(0x5c3, &[0x39, code]), 100);
+    press(&mut m, 0x04);
+    run(&mut m, 300, &mut reports);
+    press(&mut m, 0x00);
+    run(&mut m, 300, &mut reports);
+    press(&mut m, 0x06);
+    run(&mut m, 300, &mut reports);
+    press(&mut m, 0x00);
+    run(&mut m, 300, &mut reports);
+    assert!(reports.contains(&[b'K', 19, 1, 0]), "NEXT: {:?}", reports);
+    assert!(reports.contains(&[b'W', 0x06, 0, 0]) && reports.contains(&[b'V', 0, 1, 0]), "volume: {:?}", reports);
+}
+
+/// Sound as a stream of blocks on the 193 (src/pcm.c, the serial sound
+/// interface and its DMA channel; examples/pcmstream): the amplifier
+/// set to the decoder's input over the radio processor's line, 440 Hz
+/// on the left and 880 on the right, then 550 and 1100 with the program
+/// away 30 ms at a time, at 44.1 kHz and without a gap.  Started the
+/// way the SD loader leaves a program (no disc needed: what is tested
+/// is the program's own use of the hardware).
+#[test]
+fn sdk_pcm_streams_on_the_193() {
+    use rnse::dev::radio::Radio;
+    let Some(mut m) = started_as_by_the_sd_loader_193("pcmstream") else { return };
+    let name = "pcmstream-193";
+    let ms = m.cycles_per_ms();
+    let mut waited = 0;
+    m.speaker = Some(Vec::new());
+    let text = loop {
+        assert_eq!(m.run(500 * ms), Stop::Budget, "{}: {:?}", name, m.cpu.fault);
+        let text = String::from_utf8_lossy(&m.console).into_owned();
+        if text.contains("DONE.") {
+            break text;
+        }
+        waited += 1;
+        assert!(waited < 80, "{}: {}", name, text);
+    };
+    let tail = &text[text.len().saturating_sub(1500)..];
+    assert!(text.contains("PCM_START: 0 (OK)") && text.contains("AMPLIFIER: OK"), "{}: {}", name, tail);
+    assert_eq!(m.radio.source, Radio::SOURCE_DECODER, "{}", name);
+    assert_eq!(m.radio.volume, 12, "{}", name);
+    for part in ["PART 1: ", "PART 2 (AWAY 30 MS): "] {
+        let l = text.lines().find(|l| l.starts_with(part)).unwrap_or_else(|| panic!("{}: {}", name, tail));
+        let rate: u32 = l[part.len()..].split(' ').next().unwrap().parse().unwrap();
+        assert!(rate.abs_diff(44_100) <= 100, "{}: {}", name, l);
+        assert!(l.ends_with("GAPS 0"), "{}: {}", name, l);
+    }
+    // Each half second's pitch, left and right: the two pairs of tones
+    // where they belong, each for most of its four seconds.
+    let heard = m.speaker.take().unwrap();
+    let side = |c: usize| -> Vec<u32> {
+        let s: Vec<i16> = heard.iter().skip(c).step_by(2).copied().collect();
+        s.chunks(22_050).map(|c| 2 * c.windows(2).filter(|w| w[0] < 0 && w[1] >= 0).count() as u32).collect()
+    };
+    let (left, right) = (side(0), side(1));
+    for (pitches, want) in [(&left, [440, 550]), (&right, [880, 1100])] {
+        for hz in want {
+            let halves = pitches.iter().filter(|&&p| p.abs_diff(hz) <= 6).count();
+            assert!(halves >= 6, "{}: {} Hz for {} half seconds: left {:?} right {:?}", name, hz, halves, left, right);
+        }
+    }
+    // No break inside a tone: no step between two samples larger than
+    // the sine's.
+    let samples: Vec<i16> = heard.iter().skip(1).step_by(2).copied().collect();
+    let chunks: Vec<&[i16]> = samples.chunks(22_050).collect();
+    for k in 1..chunks.len().saturating_sub(1) {
+        let hz = right[k];
+        if ![880u32, 1100].iter().any(|&f| hz.abs_diff(f) <= 6) || right[k - 1].abs_diff(hz) > 6 || right[k + 1].abs_diff(hz) > 6 {
+            continue;
+        }
+        let peak = chunks[k].iter().map(|v| i32::from(*v).abs()).max().unwrap();
+        let largest = chunks[k].windows(2).map(|w| (i32::from(w[1]) - i32::from(w[0])).abs()).max().unwrap();
+        let slope = (1.4 * 2.0 * std::f64::consts::PI * f64::from(hz) / 44_100.0 * f64::from(peak)) as i32;
+        assert!(peak > 0 && largest <= slope + 2, "{}: {} Hz: a step of {} where its sine of {} has at most {}", name, hz, largest, peak, slope);
+    }
+    assert!(!text.contains("unexpected"), "{}: {}", name, tail);
+    let cache = &m.cpu.cache.trouble;
+    assert_eq!((cache.stale_fetches, cache.dirty_discarded), (0, 0), "{}: {:?}", name, cache);
+}
+
 /// examples/sdload193, the 193's first SD loader, started as the unit
 /// would start it with a card in the first slot: it finds LINKBENC.BIN
 /// (what the SD bridge serves) before RNSE.BIN, starts it, and has

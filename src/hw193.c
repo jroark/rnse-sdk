@@ -379,6 +379,34 @@ void can_init(void)
     REG32(INT2MSKCR) = 0x02000000;
 }
 
+/* The controller as the stock software left it, for a program it
+ * started: no reset and the bit timing untouched (the bench 193's bus
+ * stayed silent after can_init, and sending through the controller as
+ * it was left worked: examples/sdload193).  Only mailbox 24 is set up
+ * again, out of use while its identifier and mask change, to receive
+ * whatever comes, and only its interrupt let through, as can_init has
+ * it.  Mailbox 1 sends, as with can_init.  A controller without a bit
+ * timing has not been set up by anybody: then can_init. */
+void can_attach(void)
+{
+    /* Nobody set it up (a program started in the loader's place by the
+     * boot ROM, or in the emulator): can_init's way, then. */
+    if (!REG16(CAN + 0x04) && !REG16(CAN + 0x06)) {
+        can_init();
+        return;
+    }
+    REG16(CAN_MB(CAN_RX) + 0x10) = 0x0700; /* out of use */
+    REG16(CAN_MB(CAN_RX) + 0x00) = 0;
+    REG16(CAN_MB(CAN_RX) + 0x04) = 0x1ffc; /* whatever the identifier */
+    REG16(CAN_MB(CAN_RX) + 0x10) = 0x0300; /* receives */
+    REG16(CAN + 0x58) = (u16)(1 << (CAN_RX - 16)); /* nothing lost yet */
+    REG16(CAN + 0x40) = (u16)(1 << (CAN_RX - 16)); /* nothing waiting */
+    REG16(CAN + 0x50) = (u16)~(1 << (CAN_RX - 16));
+    REG16(CAN + 0x52) = 0xffff;
+    REG32(INT2PRI0 + 0x14) = 0x000a0000;
+    REG32(INT2MSKCR) = 0x02000000;
+}
+
 int can_send_for(u16 id, const u8 *data, int len, u32 us)
 {
     u32 start = micros();

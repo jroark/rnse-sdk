@@ -300,6 +300,19 @@ light.  The stock driver takes the processor's words in an interrupt.
 The SDK's now takes what is there to read whenever it waits to write
 (`put` in `src/sd.c`), and that was all it wanted.
 
+On the 193 the kit plays samples through the system-on-chip's own
+serial sound interface (`pcm_start`, `pcm_stream`; `src/pcm.c`), fed by
+DMA channel 3. The registers are written in the order the stock sound
+driver writes them, which was read from the stock software playing an
+MP3 in the emulator. The 193's radio processor is on a line of its own
+(0xff915000) and takes the same frames, so `radio_source` and
+`radio_volume` work there too. Unlike the stock driver, the kit takes no
+interrupt: the stream moves on whenever the program asks for a block.
+In the emulator, `examples/pcmstream` comes out at 44.1 kHz with each
+tone on its side and no gap, also when the program comes back only
+every 30 ms (`tests/emulated.rs`, `sdk_pcm_streams_on_the_193`). It has
+not yet been heard on a unit.
+
 The tuner is the radio processor's too: `radio_tune` sends it to a
 frequency, and `examples/tuner` is a radio made of that, the
 source and the volume.  On the unit it is heard, and tunes: the radio

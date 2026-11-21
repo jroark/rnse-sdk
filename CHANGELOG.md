@@ -3,6 +3,36 @@
 Changes to what other repositories depend on (CLAUDE.md, "Interfaces
 other repositories depend on"); releases are tagged.
 
+## v0.4.0
+
+Sound and the radio processor on the 193, and CAN taken as the stock
+software left it; on the 192, `can_attach` is `can_init` and the
+rest is unchanged.
+
+- `include/rnse.h`, `src/pcm.c`: on the 193, `pcm_start` and the
+  streams (`pcm_stream`, `pcm_stream_block`, `pcm_stream_ready`,
+  `pcm_stream_stop`, `pcm_stop`) play through the serial sound
+  interface at 44.1 kHz.
+  - No interrupt: the ring moves on when the program calls
+    `pcm_stream_block` or `pcm_stream_ready`, at least once a block.
+  - `pcm_put`, `pcm_dma` and `pcm_loop` still return below 0 there.
+  - New `pcm_gaps` (both units): how often a block was not ready in time.
+- `src/radio.c`: `radio_command`, `radio_source`, `radio_volume`,
+  `radio_tune`, `radio_status` and `radio_start` work on the 193.
+  - The line is at 0xff915000, with its registers four bytes apart.
+  - `radio_start` uses the 193 software's bit rate.
+  - `radio_keepalive` stays 192-only.
+- `include/rnse.h`: `can_attach` takes the controller as the software
+  that started the program left it, with no reset and no new bit
+  timing, and receives everything as `can_init` does.
+  - On the 192 it is `can_init`.
+  - On a 193 controller that nobody set up, it falls back to `can_init`.
+  - `car_init` uses it (on the bench 193, `can_init` left the bus silent).
+- `examples/pcmstream` (both units): tones by stream, reported on CAN 0x7F8.
+- `tests/emulated.rs`: `started_as_by_the_sd_loader_193`, and with it
+  `sdk_pcm_streams_on_the_193` and
+  `car_driver_attaches_to_the_193_s_controller`. Neither needs a disc.
+
 ## v0.3.0
 
 Additions, and the 193 as measured on a unit (rnse's

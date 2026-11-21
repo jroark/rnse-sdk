@@ -335,6 +335,12 @@ void can_init(void)
     REG8(0xb2a00001) |= 0x0c;
 }
 
+/* The 192's can_init has worked from every start: the same. */
+void can_attach(void)
+{
+    can_init();
+}
+
 int can_send_for(u16 id, const u8 *data, int len, u32 us)
 {
     u32 start = micros();
