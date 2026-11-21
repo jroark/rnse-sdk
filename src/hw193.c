@@ -498,7 +498,10 @@ static void screen_init_plane(void)
     REG32(PLANE(6) + 0x00) = 0x04000002;
     REG32(PLANE(6) + 0x04) = STRIDE;
     REG32(PLANE(6) + 0x08) = 0xff;
-    REG32(PLANE(6) + 0x10) = 800;
+    /* As wide as the surface, as the loader's plane: the picture starts
+     * LEFT pixels in, so a plane 800 wide would leave the panel's last
+     * LEFT columns black. */
+    REG32(PLANE(6) + 0x10) = STRIDE;
     REG32(PLANE(6) + 0x14) = 496;
     REG32(PLANE(6) + 0x18) = 0;
     REG32(PLANE(6) + 0x1c) = 0;
