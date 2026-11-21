@@ -233,6 +233,11 @@ int sd_init(int slot);
  * every command: its word, argument, response and result. */
 int sdhi_start(int slot);
 int sdhi_read(u32 sector, void *buf);
+/* count sectors with one CMD18 (the host sends CMD12 by itself). */
+int sdhi_read_multi(u32 sector, u32 count, void *buf);
+/* The clock divider after the start (0, the default, the stock
+ * software's and the fastest; 1 half that); for the next sdhi_start. */
+extern u16 sdhi_fast_clock;
 extern void (*sdhi_trace)(int cmd, u32 arg, u32 response, int result);
 /* Called over and over while sd_init waits (it takes seconds): set it
  * to panel_poll in a program that talks to the faceplate. */

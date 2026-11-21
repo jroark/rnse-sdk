@@ -607,11 +607,17 @@ void board_init(void)
 #define INFO2_ERRORS 0x807f /* CRC, end bit, timeouts, illegal access */
 #define INFO2_TIMEOUT 0x0040
 #define INFO2_READ 0x0100   /* a block can be read from the data port */
-#define INFO2_IDLE 0x2000
+#define INFO2_BUSY 0x4000 /* the command line is in use */
 
 void (*sdhi_trace)(int cmd, u32 arg, u32 response, int result);
 static int sdhi_ccs, sdhi_slot = -1;
 static u16 sdhi_clock;
+/* The clock's divider once a card has started (bits 7..0 of +0x24: 0
+ * half the interface's clock, 1 a quarter, 2 an eighth, ...); the stock
+ * software takes 0, and so does the kit since examples/speed193 read the
+ * SD bridge at both on the bench 193 without a bad sector (CMD18: 2.9
+ * MB/s at 0, 1.48 at 1).  Takes effect at the next sdhi_start. */
+u16 sdhi_fast_clock = 0x0000;
 
 static int sdhi_wait(u32 reg, u16 bits, u16 errors, u32 ms)
 {
@@ -634,8 +640,13 @@ static int sdhi_command(u16 word, u32 arg, u32 *response)
 {
     int r;
     u32 start = millis();
-    while (!(REG16(SD_INFO2) & INFO2_IDLE))
-        if (millis() - start > 100)
+    /* Until the command line is free (CBSY, bit 14 of INFO2).  The kit
+     * used to wait for bit 13 instead, which the emulator always shows
+     * set; on these hosts it says the clock divider may be changed, and
+     * with the clock running it waited out its 100 ms before every
+     * command: some 4 KB/s on the bench 193. */
+    while (REG16(SD_INFO2) & INFO2_BUSY)
+        if (millis() - start > 10)
             break;
     REG16(SD_CLK) = sdhi_clock;
     REG16(SD_CLK) = (u16)(sdhi_clock | 0x0100);
@@ -734,7 +745,7 @@ int sdhi_start(int slot)
     if (sdhi_command(0x0003, 0, &r)) /* CMD3: the card's address */
         return -7;
     r &= 0xffff0000;
-    sdhi_clock = 0x0001;             /* faster from here (the stock 0: quarter of that divider's) */
+    sdhi_clock = sdhi_fast_clock;    /* faster from here */
     if (sdhi_command(0x0007, r, 0))  /* CMD7: selected */
         return -8;
     if (!sdhi_ccs && sdhi_command(0x0010, 512, 0)) /* CMD16 */
@@ -742,6 +753,49 @@ int sdhi_start(int slot)
     REG16(SD_SIZE) = 512;
     sdhi_slot = slot;
     return 0;
+}
+
+/* count sectors from sector on with one CMD18.  The host counts the
+ * blocks itself (the count at +0x0a, enabled by bit 8 of +0x08) and then
+ * ends the transfer with CMD12 on its own, as Toshiba's and Renesas' SD
+ * hosts do; each block is taken from the data port as for CMD17.  0, or
+ * minus (0x100 + the block it stopped at) when a block did not come, and
+ * -2 when the card refused the command. */
+int sdhi_read_multi(u32 sector, u32 count, void *buf)
+{
+    u8 *out = buf;
+    u32 b;
+    int i, r;
+    if (sdhi_slot < 0)
+        return -1;
+    if (count == 0)
+        return 0;
+    REG16(SD_SIZE) = 512;
+    REG16(SDHI + 0x08) = 0x0100;     /* block count on: CMD12 by the host */
+    REG16(SDHI + 0x0a) = (u16)count;
+    if (sdhi_command(0x0012, sdhi_ccs ? sector : sector << 9, 0)) { /* CMD18 */
+        REG16(SDHI + 0x08) = 0;
+        return -2;
+    }
+    for (b = 0; b < count; b++) {
+        r = sdhi_wait(SD_INFO2, INFO2_READ, INFO2_ERRORS, 500);
+        if (r) {
+            REG16(SDHI + 0x08) = 0x0001; /* stop */
+            REG16(SDHI + 0x08) = 0;
+            return -(int)(0x100 + b);
+        }
+        REG16(SD_INFO2) = (u16)~INFO2_READ;
+        for (i = 0; i < 256; i++) {
+            u16 w = REG16(SD_DATA);
+            out[2 * i] = (u8)(w >> 8);
+            out[2 * i + 1] = (u8)w;
+        }
+        out += 512;
+    }
+    r = sdhi_wait(SD_INFO1, INFO1_ACCESS, INFO2_ERRORS, 500);
+    REG16(SD_INFO1) = (u16)~INFO1_ACCESS;
+    REG16(SDHI + 0x08) = 0;
+    return r ? -4 : 0;
 }
 
 int sdhi_read(u32 sector, void *buf)
