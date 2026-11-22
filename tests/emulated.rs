@@ -2472,3 +2472,174 @@ fn mon193_answers_guards_and_recovers() {
     let stopped = m.cpu.fault.as_deref().is_some_and(|f| f.contains("expects the watchdog"));
     assert!(stop != Stop::Budget && (m.reset_requested || stopped), "the watchdog did not reset a hung monitor: {:?} {:?}", stop, m.cpu.fault);
 }
+
+/// examples/side193: started from a disc by the 193's stock software
+/// like an update loader, it puts a resident in RAM, hooks the stock
+/// software's tick and returns, and the stock software goes on: its
+/// cyclic CAN frames keep coming and its interface answers a key,
+/// while the resident answers requests on CAN (mon193's protocol).
+/// Nothing is written to flash, and switched off it leaves the stock
+/// software's table as it found it.
+#[test]
+fn side193_runs_beside_the_stock_software() {
+    use rnse::board::Model;
+    use rnse::dev::hcan::Frame;
+    let Some(image) = disc() else { return };
+    // The disc goes in with the interface up, 20 s after the start.
+    let Some((mut m, name, custom)) = started_by_stock_software_with(&image, Model::Rnse193, "side193", Some(20_000)) else { return };
+    let ms = m.cycles_per_ms();
+    let flash = m.board.flash.clone();
+    let stock_tick = m.peek32(0x8e8d_0480).unwrap();
+    assert_eq!(stock_tick >> 24, 0x80, "{}: the stock tick handler", name);
+    m.can().tx.clear();
+    // Every frame sent since the last look, the stock software's
+    // counted by identifier and the resident's (0x7f0-0x7ff) kept.
+    fn frames(m: &mut Machine, stock: &mut std::collections::BTreeMap<u16, u32>) -> Vec<Frame> {
+        let mut own = Vec::new();
+        for f in m.can().tx.drain(..) {
+            if f.id >= 0x7f0 {
+                own.push(f);
+            } else {
+                *stock.entry(f.id).or_default() += 1;
+            }
+        }
+        own
+    }
+    let mut stock = std::collections::BTreeMap::new();
+    assert_eq!(m.run(3_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    let own = frames(&mut m, &mut stock);
+    // Its record at the start, and one two seconds later.
+    assert!(own.iter().any(|f| f.id == 0x7f8 && f.data[0] == 0xb3 && f.data[1] == 1), "no start record: {:x?}", own);
+    assert!(own.iter().any(|f| f.id == 0x7f8 && f.data[0] == 0xb2), "no record after two seconds: {:x?}", own);
+    assert_eq!(m.peek32(0x8e8d_0480).unwrap() >> 16, 0x8bff, "the resident's entry is not in the table");
+
+    let mut seq = 0u8;
+    let mut ask = |m: &mut Machine, op: u8, a: u32, x: u8, y: u8, wait: u64| -> Vec<Frame> {
+        seq = seq.wrapping_add(1);
+        let a = a.to_be_bytes();
+        m.can_frame(Frame::new(0x7f2, &[seq, op, a[0], a[1], a[2], a[3], x, y]));
+        assert_eq!(m.run(wait * ms), Stop::Budget, "{:?}", m.cpu.fault);
+        let mut none = std::collections::BTreeMap::new();
+        let own = frames(m, &mut none);
+        let answers: Vec<Frame> = own.into_iter().filter(|f| (f.id == 0x7f3 && f.data[0] == seq) || f.id == 0x7f9).collect();
+        assert!(answers.iter().any(|f| f.id == 0x7f3), "no answer to op {:02x}", op);
+        answers
+    };
+    let value = |f: &Frame| u32::from_be_bytes([f.data[2], f.data[3], f.data[4], f.data[5]]);
+    // What it is, and the processor's version register.
+    let r = ask(&mut m, 5, 6 << 24, 0, 0, 100);
+    assert_eq!((r[0].data[1], value(&r[0])), (0, 2), "{:x?}", r);
+    let r = ask(&mut m, 5, 10 << 24, 0, 0, 100);
+    assert_eq!(value(&r[0]), stock_tick, "{:x?}", r);
+    let r = ask(&mut m, 1, 0xff00_0030, 4, 0, 100);
+    assert_eq!((r[0].data[1], value(&r[0])), (0, 0x1030_0700), "{:x?}", r);
+    // Three words of the OS module's header out of the flash.
+    let r = ask(&mut m, 1, 0x8040_0270, 4, 3, 200);
+    assert_eq!(r.len(), 3, "{:x?}", r);
+    for (i, f) in r.iter().enumerate() {
+        assert_eq!(value(f), m.peek32(0x8040_0270 + 4 * i as u32).unwrap(), "{:x?}", r);
+    }
+    // A block of it, with its CRC.
+    let r = ask(&mut m, 4, 0x8040_0200, 0, 100, 1_000);
+    let mut bytes = vec![0u8; 100];
+    for f in r.iter().filter(|f| f.id == 0x7f9) {
+        let at = (f.data[0] as usize) << 16 | (f.data[1] as usize) << 8 | f.data[2] as usize;
+        for i in 0..5.min(100 - at) {
+            bytes[at + i] = f.data[3 + i];
+        }
+    }
+    let expect: Vec<u8> = (0..100).map(|i| m.peek8(0x8040_0200 + i).unwrap()).collect();
+    assert_eq!(bytes, expect);
+    let last = r.iter().find(|f| f.id == 0x7f3).unwrap();
+    assert_eq!((last.data[1], value(last)), (0, crc32(&expect)), "{:x?}", r);
+    // A write to RAM is made, one to the flash or to the battery-backed
+    // memory refused, and so is an address that would end in an
+    // exception.
+    let r = ask(&mut m, 2, 0x1234_5678, 0, 0, 100);
+    assert_eq!(r[0].data[1], 0);
+    let r = ask(&mut m, 3, 0x8bfe_0000, 4, 0, 100);
+    assert_eq!(r[0].data[1], 0, "{:x?}", r);
+    assert_eq!(m.peek32(0x8bfe_0000), Some(0x1234_5678));
+    for refused in [0x8040_0200u32, 0xb800_0000, 0xa040_0200] {
+        let r = ask(&mut m, 3, refused, 4, 0, 100);
+        assert_eq!(r[0].data[1], 2, "{:08x}: {:x?}", refused, r);
+    }
+    let r = ask(&mut m, 1, 0x8c00_0001, 4, 0, 100);
+    assert_eq!(r[0].data[1], 2, "{:x?}", r);
+    let r = ask(&mut m, 1, 0x9c00_0000, 4, 0, 100);
+    assert_eq!(r[0].data[1], 2, "{:x?}", r);
+
+    // The stock software meanwhile: a key changes the picture, and its
+    // frames come at their rates for ten seconds more.
+    let before = m.render().2;
+    assert!(m.panel_key("SETUP", true));
+    assert_eq!(m.run(1_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    assert!(m.panel_key("SETUP", false));
+    assert_eq!(m.run(4_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    assert!(m.render().2 != before, "{}: SETUP changed nothing on the screen", name);
+    stock.clear();
+    frames(&mut m, &mut stock);
+    stock.clear();
+    assert_eq!(m.run(10_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    let own = frames(&mut m, &mut stock);
+    assert!(stock.get(&0x661).copied().unwrap_or(0) >= 8 && stock.get(&0x6c0).copied().unwrap_or(0) >= 40, "{}: the stock software's frames: {:x?}", name, stock);
+    assert_eq!(own.iter().filter(|f| f.id == 0x7f8 && f.data[0] == 0xb2).count(), 5, "{:x?}", own);
+    // A tick's work stays far below the millisecond (12462 counts).
+    let r = ask(&mut m, 5, 11 << 24, 0, 0, 100);
+    assert!(value(&r[0]) < 2_000, "the longest tick took {} timer counts", value(&r[0]));
+    let r = ask(&mut m, 5, 9 << 24, 0, 0, 100);
+    assert_eq!(value(&r[0]), 0, "frames given up");
+
+    // The disc taken out and put in again while it is at work: the
+    // stock software calls the program on the disc a second time, and
+    // that leaves the resident as it is (its clock runs on, and the
+    // handler it calls after its own is still the stock software's).
+    let r = ask(&mut m, 5, 1 << 24, 0, 0, 100);
+    let clock = value(&r[0]);
+    assert!(clock > 15_000, "{}", clock);
+    m.atapi().insert(None);
+    assert_eq!(m.run(5_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    m.atapi().insert(Some(custom.clone()));
+    let third = fw::load_variants(&custom).unwrap().iter().find(|x| x.name == name).unwrap().module("LDM").unwrap().entries[2];
+    m.cpu.breakpoints.push(third);
+    let mut again = false;
+    for _ in 0..30 {
+        if m.run(1_000 * ms) == Stop::Breakpoint && m.cpu.pc == third {
+            again = true;
+            m.cpu.breakpoints.clear();
+        }
+    }
+    assert!(m.cpu.fault.is_none(), "{:?}", m.cpu.fault);
+    assert!(again, "{}: the stock software did not start the disc's program a second time", name);
+    frames(&mut m, &mut stock);
+    let r = ask(&mut m, 5, 1 << 24, 0, 0, 100);
+    assert!(value(&r[0]) > clock + 30_000, "the resident started afresh: {} after {}", value(&r[0]), clock);
+    let r = ask(&mut m, 5, 10 << 24, 0, 0, 100);
+    assert_eq!(value(&r[0]), stock_tick, "{:x?}", r);
+
+    // Switched off: the stock handler is back, no more records, and
+    // the stock software goes on.
+    let r = ask(&mut m, 0x10, 0x4f46_4621, 0, 0, 100);
+    assert_eq!(r[0].data[1], 0, "{:x?}", r);
+    assert_eq!(m.peek32(0x8e8d_0480), Some(stock_tick));
+    stock.clear();
+    assert_eq!(m.run(5_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    let own = frames(&mut m, &mut stock);
+    assert!(own.is_empty(), "{:x?}", own);
+    assert!(stock.get(&0x661).copied().unwrap_or(0) >= 4, "{:x?}", stock);
+    // The stock software writes its own files in the flash as it runs
+    // (0x1000000-0x3420000 between the modules, with or without this
+    // program); what must not change is what it runs from and the
+    // unit's parameters: the boot ROM's 4 MiB, every module, and the
+    // last 128 KiB.
+    let variants = fw::load_variants(&image).unwrap();
+    let v = variants.iter().find(|v| v.name == name).unwrap();
+    let mut kept = vec![(0usize, 0x40_0000usize), (flash.len() - 0x2_0000, flash.len())];
+    for module in v.modules.iter().filter(|x| x.name != "LDM") {
+        let at = (module.load_addr & 0x1fff_ffff) as usize;
+        kept.push((at, at + module.size as usize));
+    }
+    for (from, to) in kept {
+        assert!(m.board.flash[from..to] == flash[from..to], "{}: the flash was written in {:#x}..{:#x}", name, from, to);
+    }
+}

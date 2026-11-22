@@ -72,7 +72,17 @@ objs=""
 # generation, a line each: the file's name and the options that take
 # the place of -m4-nofpu -Os (-m4 for code that uses the
 # FPU, which the kit's own code leaves alone; -O2 for speed).
-for src in src/crt0.S src/common.c src/heap.c src/libgcc.S src/cache.S src/panel.c src/display.c src/cd.c src/can.c src/car.c src/sd.c src/pcm.c src/radio.c src/flash.c src/wayback.c src/enter.c src/hw$unit.c "$dir"/*.c; do
+# An example with a file `bare` is not a kit program: it has start-up
+# code and a link script (`link.ld`) of its own and links none of the
+# kit's drivers, only the files of src/ its `bare` names (side193,
+# which runs beside the stock software and must touch nothing).
+kit="src/crt0.S src/common.c src/heap.c src/libgcc.S src/cache.S src/panel.c src/display.c src/cd.c src/can.c src/car.c src/sd.c src/pcm.c src/radio.c src/flash.c src/wayback.c src/enter.c src/hw$unit.c"
+script=link.ld
+if [ -f "$dir/bare" ]; then
+    kit="$(cat "$dir/bare") $(ls "$dir"/*.S)"
+    script=$dir/link.ld
+fi
+for src in $kit "$dir"/*.c; do
     obj=$objdir/$(basename "$src" | sed 's/\.[cS]$/.o/')
     own=""
     case $src in
@@ -97,6 +107,6 @@ for lib in $libs; do
         objs="$objs $obj"
     done
 done
-${CROSS}ld -EB --no-warn-rwx-segments --gc-sections -T link.ld --defsym LOAD=$load --defsym SIZE=$size -o out/$example-$unit.elf $objs
+${CROSS}ld -EB --no-warn-rwx-segments --gc-sections -T $script --defsym LOAD=$load --defsym SIZE=$size -o out/$example-$unit.elf $objs
 ${CROSS}objcopy -O binary out/$example-$unit.elf out/$example-$unit.bin
 ls -l out/$example-$unit.bin

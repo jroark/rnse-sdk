@@ -1,0 +1,25 @@
+# examples/side193, the resident beside the stock software: what it
+# is, the processor, and the stock software's hardware as it runs.
+# Reads only.
+info 0
+info 6                  # 2: beside the stock software
+info 2
+info 3
+info a                  # the stock tick handler it was put in front of
+r32 ff000030            # PVR
+r32 ff000040 2          # CVR, PRR
+r32 ff00001c            # CCR
+# The OS module's header: its load address, size, checksum, entries,
+# and the version text before them
+block 80400200 100 osm-header.bin
+# The CAN controller as the stock software runs it
+r16 ffdf0000 8
+r16 ffdf0050 2          # mailbox interrupt mask
+r16 ffdf01e0 a          # mailbox 7 (this program's, sends)
+r16 ffdf0200 a          # mailbox 8 (this program's, receives)
+r16 ffdf0140 a          # mailbox 2 (the stock software's)
+wait 5000
+info 1
+info 5
+info 9
+info b                  # the longest tick's work, timer counts

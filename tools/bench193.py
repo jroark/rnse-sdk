@@ -54,6 +54,11 @@ The script, a line each ('#' starts a comment; numbers in hex):
     send ID HEX                 a frame of our own onto the bus
     note TEXT                   into OUT as it is
 
+The same scripts run against examples/side193, the resident beside the
+stock software (docs/side193.md; its records are 0xb3 and 0xb2): the
+disc that starts it is in the drive, nothing is pushed, and of the lines
+above it knows r, w, block, info, wait, send and note.
+
 OUT gets a line for each value, `r32 ff000030 = 10300700`, `= FAULT 0e0`
 for an exception, `= REFUSED`, `= LOST` when the monitor went away."""
 import os
@@ -189,13 +194,13 @@ class Bench:
                         self.due = 'monitor'
                     self.due_at = time.time() + 1.5
                     self.tries = 10
-                elif d[0] == 0xb1:
+                elif d[0] in (0xb1, 0xb3):
                     self.alive = True
                     self.seen = time.time()
                     self.starts += 1
                     self.due = None
-                    self.log.note('MONITOR started (version %d)' % d[1])
-                elif d[0] == 0xb0:
+                    self.log.note('%s started (version %d)' % ('MONITOR' if d[0] == 0xb1 else 'SIDE193, beside the stock software,', d[1]))
+                elif d[0] in (0xb0, 0xb2):
                     if not self.alive:
                         self.log.note('MONITOR heard')
                     self.alive = True
