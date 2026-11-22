@@ -11,7 +11,7 @@ license = "MIT"
 publish = false
 
 [dev-dependencies]
-rnse = { git = "https://github.com/jroark/rnse", rev = "b4446e046df0f11cefa7ebd1e8392b268abaf01c" }
+rnse = { git = "https://github.com/jroark/rnse", rev = "b26a62d959e3517ef9a0310586509db20dfafdc7" }
 
 # The emulator's end of tools/bench193.py.
 [[example]]

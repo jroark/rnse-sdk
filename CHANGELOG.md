@@ -21,13 +21,31 @@ rest is unchanged.
   `radio_tune`, `radio_status` and `radio_start` work on the 193.
   - The line is at 0xff915000, with its registers four bytes apart.
   - `radio_start` uses the 193 software's bit rate.
-  - `radio_keepalive` stays 192-only.
+  - `radio_keepalive` sends the 193's as well: 8a every 30 s and
+    81 [06] every 60, as its stock software. A bench 193 sent neither
+    started again after 13 minutes; sent both it stayed up.
 - `include/rnse.h`: `can_attach` takes the controller as the software
   that started the program left it, with no reset and no new bit
   timing, and receives everything as `can_init` does.
   - On the 192 it is `can_init`.
   - On a 193 controller that nobody set up, it falls back to `can_init`.
   - `car_init` uses it (on the bench 193, `can_init` left the bus silent).
+- `src/hw193.c`: three faults a bench 193 showed, found with `mon193`.
+  - The clock (`millis`, `micros`, `delay_ms`, every time-out) ran at
+    twice the world's pace: the tick handler was entered twice for
+    each underflow. Programs built with an earlier kit have all their
+    times on a 193 halved.
+  - The tick is 124620 counts (the timers count 12.462 MHz, not
+    12.4876).
+  - `can_init` keeps the controller's top control bit set (0x8001,
+    0x8000): cleared, the controller moved the identifier in every
+    mailbox, which was the silent bus.
+- `src/can.c`: `canload` sends its replies up to three times and says
+  again which frame is missing (a reply lost on the bus stopped a push).
+- `examples/mon193`, `tools/bench193.py`, `tools/mon193emu.rs`,
+  `tools/bench193/`: a monitor for a bench 193 driven over CAN from
+  scripts, on a unit and on the emulator alike, and `diff` between the
+  two.
 - `examples/pcmstream` (both units): tones by stream, reported on CAN 0x7F8.
 - `tests/emulated.rs`: `started_as_by_the_sd_loader_193`, and with it
   `sdk_pcm_streams_on_the_193` and
