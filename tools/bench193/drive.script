@@ -1,0 +1,14 @@
+# The drive read by the kit's driver (programmed I/O): the disc's
+# volume descriptor and some sectors further in.  The CRCs are those of
+# the disc's image.
+push
+info 0
+cdinit
+cdready 15000
+cdread 10
+cdread 11 4
+cdread 100 4
+cdread 2000 4
+cdread 5000 4
+info 4
+info 9

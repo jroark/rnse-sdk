@@ -39,6 +39,12 @@
  *   0c KEEPALIVE  1 or 0: the radio processor's keep-alive sent or not
  *             (it is, from the start: without it the unit starts again
  *             after some thirteen minutes)
+ *   0e DRIVE  sector (4), count (1, up to 4), what (1): 0 the sectors
+ *             read by cd_read into a buffer of the monitor's: four
+ *             answers, cd_read's result, the CRC-32 of the buffer, the
+ *             microseconds it took, the buffer's address (for BLOCK);
+ *             1 cd_init and 2 cd_wait_ready (the sector field its
+ *             milliseconds): their result
  *   0d CANINIT  variant (1): the CAN controller from reset (can_try,
  *             below); the answer: the status after the reset and when
  *             running, the variant, the tries the answer took.  No
@@ -61,7 +67,7 @@
  * (panel_service), and a program pushed over CAN replaces it. */
 #include "rnse.h"
 
-#define VERSION 6
+#define VERSION 8
 #define REQUEST 0x7f2
 #define ANSWER 0x7f3
 #define FRONT 0x7f4
@@ -412,6 +418,45 @@ static void request(const u8 *d)
         radio_on = d[2] & 1;
         out(ANSWER, seq, 0, (u32)radio_on, 0, 0);
         break;
+    case 0x0e: {
+        /* The drive, by the kit's driver. */
+        static u8 sectors[4 * 2048] __attribute__((aligned(32)));
+        u32 crc = 0xffffffff, k;
+        int j;
+        /* The drive takes seconds over a disc it has to spin up, and
+         * the kit's waits for it are long: the watchdog is the tick's
+         * meanwhile (left to this loop, a first read on a bench 193
+         * ended in the watchdog's reset, five times). */
+        watchdog_hold = 0;
+        if (d[7] == 1) {
+            e = cd_init();
+            watchdog_hold = 1;
+            out(ANSWER, seq, 0, (u32)e, 0, 1);
+            break;
+        }
+        if (d[7] == 2) {
+            e = cd_wait_ready(a);
+            watchdog_hold = 1;
+            out(ANSWER, seq, 0, (u32)e, 0, 2);
+            break;
+        }
+        n = d[6] < 1 ? 1 : d[6] > 4 ? 4 : d[6];
+        v = micros();
+        e = cd_read(a, (u32)n, sectors);
+        v = micros() - v;
+        watchdog_hold = 1;
+        feed();
+        for (k = 0; k < (u32)n * 2048; k++) {
+            crc ^= sectors[k];
+            for (j = 0; j < 8; j++)
+                crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1)));
+        }
+        out(ANSWER, seq, 0, (u32)e, (u8)n, 0);
+        out(ANSWER, seq, 0, ~crc, 0, 0);
+        out(ANSWER, seq, 0, v, 0, 0);
+        out(ANSWER, seq, 0, (u32)sectors, 0, 0);
+        break;
+    }
     case 0x0d:
         can_try(seq, d[2]);
         break;

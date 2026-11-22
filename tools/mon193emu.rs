@@ -9,7 +9,8 @@
 //! With `--disc` the unit has the disc's software installed under the
 //! index given (lower than the disc's: the stock software then starts
 //! the disc's loader, as on the bench); with `--direct` a program is
-//! started as the SD loader starts one.  A run that ends (the watchdog,
+//! started as the SD loader starts one (and `--disc` with it puts that
+//! disc in the drive).  A run that ends (the watchdog,
 //! a restart) starts the unit again, as a unit does.  Emulated time is
 //! held back to the clock's, never ahead of it.  `--strict` models the
 //! CPU's caches as the kit's tests do (several times slower).
@@ -38,6 +39,10 @@ fn boot(disc: &Option<Vec<u8>>, direct: &Option<Vec<u8>>, variant: &str, index: 
         // controller running.
         m.watchdog_always = true;
         m.can().start();
+        // With --disc as well: that disc in the drive.
+        if let Some(image) = disc {
+            m.atapi().load(image.clone());
+        }
     } else {
         let image = disc.as_ref().unwrap();
         let variants = fw::load_variants(image).expect("the disc's software");

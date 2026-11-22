@@ -39,6 +39,9 @@ The script, a line each ('#' starts a comment; numbers in hex):
                                 processor (on from its start)
     wait MS                     (decimal)
     restart | hang | loader     and wait for the monitor to be back
+    cdinit | cdready MS         the kit's cd_init, cd_wait_ready: the result
+    cdread SECTOR [N]           N sectors (up to 4) by cd_read: its result
+                                and the CRC-32 of what it read
     caninit N                   the CAN controller set up from reset, variant
                                 N (examples/mon193, can_try); LOST when it
                                 leaves the bus silent (the unit restarts)
@@ -455,6 +458,18 @@ def run(argv):
                             raise SystemExit(1)
                     say('%s = back' % cmd)
                     b.log.note('%s: back after %.1f s' % (cmd.upper(), time.time() - t))
+                elif cmd in ('cdinit', 'cdready'):
+                    arg = int(w[1]) if len(w) > 1 else 0
+                    st, value, _, _ = b.ask(14, arg.to_bytes(4, 'big') + bytes([0, 1 if cmd == 'cdinit' else 2]), timeout=arg / 1000 + 15, tries=1)[0]
+                    say('%s = %d' % (line, value - (1 << 32) if value >> 31 else value))
+                elif cmd == 'cdread':
+                    sector, n = number(w[1]), (number(w[2]) if len(w) > 2 else 1)
+                    got = b.ask(14, sector.to_bytes(4, 'big') + bytes([n, 0]), count=4, timeout=20, tries=1)
+                    r = [g[1] for g in got]
+                    res = r[0] - (1 << 32) if r[0] >> 31 else r[0]
+                    say('cdread %x %x = %d, crc %08x' % (sector, n, res, r[1]) if len(r) == 4 else '%s = ?' % line)
+                    if len(r) == 4:
+                        b.log.note('cdread %x: %d us, buffer at %08x' % (sector, r[2], r[3]))
                 elif cmd == 'caninit':
                     st, value, variant, tries = b.ask(13, bytes([number(w[1]), 0, 0, 0, 0, 0]), timeout=3.0, tries=1)[0]
                     say('%s = works: status %04x after the reset, %04x running, answer at try %d' % (line, value >> 16, value & 0xffff, tries + 1))
