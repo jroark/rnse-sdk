@@ -39,6 +39,11 @@
  *   0c KEEPALIVE  1 or 0: the radio processor's keep-alive sent or not
  *             (it is, from the start: without it the unit starts again
  *             after some thirteen minutes)
+ *   0d CANINIT  variant (1): the CAN controller from reset (can_try,
+ *             below); the answer: the status after the reset and when
+ *             running, the variant, the tries the answer took.  No
+ *             answer: that variant leaves the bus silent, and the unit
+ *             starts again
  *   0b TORADIO  command (1), length (1, up to 4), data: a frame to the
  *             radio processor (radio_command); the answer's first four
  *             bytes, then radio_command's result and the answer's
@@ -56,7 +61,7 @@
  * (panel_service), and a program pushed over CAN replaces it. */
 #include "rnse.h"
 
-#define VERSION 3
+#define VERSION 5
 #define REQUEST 0x7f2
 #define ANSWER 0x7f3
 #define FRONT 0x7f4
@@ -258,6 +263,68 @@ static void block(u8 seq, u32 addr, u32 len)
     out(ANSWER, seq, 0, ~crc, (u8)(len >> 8), (u8)len);
 }
 
+/* The CAN controller set up from reset, as the kit's can_init does it
+ * (which left a bench 193's bus silent), with what may be wrong with
+ * that made a choice: bit 0, the control register's top bit kept set,
+ * as the stock software has it (it reads 0x8000 there, and can_init
+ * writes 1 and 0); bit 1, the controller's own word waited for after
+ * asking for the reset and after letting it run (status bit 3).  The
+ * answer says which; if it cannot be sent in ten tries, or no request
+ * comes in during the five seconds after it, the unit is started
+ * again, which is the way back to a monitor that can talk. */
+#define CAN 0xffdf0000
+#define CAN_MB(n) (CAN + 0x100 + 0x20 * (n))
+
+static u32 on_trial;
+
+static void can_try(u8 seq, int variant)
+{
+    u16 top = variant & 1 ? 0x8000 : 0;
+    u32 sr, t;
+    u16 status_reset, status_run;
+    int n, ok = 0;
+    sr = irq_save();
+    REG16(CAN + 0x00) = (u16)(top | 0x0001);
+    if (variant & 2)
+        for (t = micros(); !(REG16(CAN + 0x02) & 0x0008) && micros() - t < 100000;)
+            ;
+    status_reset = REG16(CAN + 0x02);
+    REG16(CAN + 0x08) = 0x0001;
+    REG16(CAN + 0x0a) = 0xfffd;
+    for (n = 0; n < 32; n++) {
+        REG32(CAN_MB(n) + 0x00) = 0;
+        REG32(CAN_MB(n) + 0x08) = 0;
+        REG32(CAN_MB(n) + 0x0c) = 0;
+        REG32(CAN_MB(n) + 0x10) = 0;
+        REG16(CAN_MB(n) + 0x10) = 0x0700;
+    }
+    REG16(CAN_MB(1) + 0x10) = 0x0000;
+    REG16(CAN_MB(24) + 0x10) = 0x0300;
+    REG16(CAN_MB(24) + 0x04) = 0x1ffc;
+    REG16(CAN + 0x06) = 0x000b;
+    REG16(CAN + 0x04) = 0xb730;
+    REG16(CAN + 0x00) = top;
+    if (variant & 2)
+        for (t = micros(); (REG16(CAN + 0x02) & 0x0008) && micros() - t < 100000;)
+            ;
+    status_run = REG16(CAN + 0x02);
+    REG16(CAN + 0x50) = (u16)~(1 << (24 - 16));
+    REG16(CAN + 0x52) = 0xffff;
+    irq_restore(sr);
+    for (n = 0; n < 10 && !ok; n++) {
+        u8 d[8] = { seq, 0, (u8)(status_reset >> 8), (u8)status_reset, (u8)(status_run >> 8), (u8)status_run, (u8)variant, (u8)n };
+        ok = can_send_for(ANSWER, d, 8, 20000) == 0;
+        feed();
+    }
+    if (!ok)
+        restart();
+    /* A frame out proves little: a bench unit set up with variant 2 sent
+     * its frames under other identifiers, heard none of ours, and had to
+     * be switched off.  So a request has to come in within five seconds
+     * of this, or the unit is started again. */
+    on_trial = millis() | 1;
+}
+
 static void request(const u8 *d)
 {
     static u32 arg;
@@ -343,6 +410,9 @@ static void request(const u8 *d)
     case 0x09:
         radio_on = d[2] & 1;
         out(ANSWER, seq, 0, (u32)radio_on, 0, 0);
+        break;
+    case 0x0d:
+        can_try(seq, d[2]);
         break;
     case 0x0c:
         radio_keepalive_off = !(d[2] & 1);
@@ -430,12 +500,16 @@ int main(void)
     for (;;) {
         service();
         while ((len = can_receive(&id, d)) >= 0) {
-            if (id == REQUEST && len == 8)
+            if (id == REQUEST && len == 8) {
+                on_trial = 0;
                 request(d);
+            }
             else
                 canload_frame(id, d, len);
             feed();
         }
+        if (on_trial && millis() - on_trial >= 5000)
+            restart();
         if (radio_on)
             radio_frames();
         if (millis() - beat >= 2000) {

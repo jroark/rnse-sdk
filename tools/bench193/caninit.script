@@ -1,0 +1,17 @@
+# Why the kit's can_init leaves a bench 193's bus silent: its set-up
+# from reset in four variants (mon193's can_try), the likeliest to
+# work first.  One that works answers, and the next request shows that
+# frames come in too; one that does not costs a restart (LOST).
+push
+info 0
+caninit 3
+info 1
+caninit 1
+info 1
+caninit 2
+info 1
+info 0
+caninit 0
+info 1
+info 0
+r16 ffdf0000 8

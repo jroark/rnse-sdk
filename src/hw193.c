@@ -57,6 +57,16 @@ const u32 way_back_marker = 0;
 
 const int screen_width = 800, screen_height = 480;
 
+/* The timers count a quarter of the peripheral clock: 12.462 MHz on a
+ * bench 193 (249.3 million counts in 20.00 s on two channels, and a
+ * clock of this kit's 3.8 s behind the world after 31 minutes at the
+ * 12.4876 MHz taken before, which is the stock software's 12488 counts
+ * for its millisecond; mon193, 2026-11-21).  A peripheral clock of
+ * 49.85 MHz, then: one and a half times a crystal of 33.23 MHz, which
+ * is what the one beside the chip, marked D332K, may well be.  Counts
+ * in 10 ms: */
+#define TICK_COUNTS 124620u
+
 static volatile u32 ticks;
 static u32 strobe;
 volatile int watchdog_hold;
@@ -108,8 +118,8 @@ u32 micros(void)
         t = ticks;
         c = REG32(TCNT0);
     } while (t != ticks);
-    /* The timer counts 124875 down to 0 in 10 ms: 12.5 a microsecond. */
-    return t * 1000 + udiv((124875 - c) * 2, 25);
+    /* The timer counts TICK_COUNTS - 1 down to 0 in 10 ms. */
+    return t * 1000 + udiv((TICK_COUNTS - 1 - c) * 100, TICK_COUNTS / 100);
 }
 
 void console_putc(char c)
@@ -363,7 +373,13 @@ void cd_data_write(u16 w)
 void can_init(void)
 {
     int n;
-    REG16(CAN + 0x00) = 0x0001; /* reset */
+    /* (The control register's top bit stays set, as the stock software
+     * has it, 0x8000: with it cleared the controller has a mailbox's
+     * identifier two bits further up, and a bench 193 set up by this
+     * code with 1 and 0 here sent 0x7f8 as 0x1fe and took no frame for
+     * what it was; with 0x8001 and 0x8000 it talked and listened as
+     * before.  mon193's can_try, 2026-11-21.) */
+    REG16(CAN + 0x00) = 0x8001; /* reset */
     REG16(CAN + 0x08) = 0x0001;
     /* Interrupts: the loader's mask is 0xfebd, which lets the end of a
      * transmission through as well; this code waits for that itself and
@@ -381,7 +397,7 @@ void can_init(void)
     REG16(CAN_MB(CAN_RX) + 0x04) = 0x1ffc; /* whatever the identifier */
     REG16(CAN + 0x06) = 0x000b;            /* bit timing */
     REG16(CAN + 0x04) = 0xb730;
-    REG16(CAN + 0x00) = 0x0000; /* run */
+    REG16(CAN + 0x00) = 0x8000; /* run */
     REG16(CAN + 0x50) = (u16)~(1 << (CAN_RX - 16)); /* that mailbox's interrupt */
     REG16(CAN + 0x52) = 0xffff;
     /* Level and mask in the interrupt controller as the loader has them. */
@@ -660,12 +676,10 @@ void board_init(void)
 
     STEP(10);
     /* The tick: timer 0 at a quarter of the 50 MHz peripheral clock
-     * (49.95 MHz going by the stock software's 12488 counts for its
-     * 1 ms), 124876 counts = 10 ms, interrupt level 7.  (The stock
-     * loader's own tick, 62438 counts, is 5 ms.) */
+     * (TICK_COUNTS, above), interrupt level 7. */
     REG16(TCR0) = 0x0020;
-    REG32(TCOR0) = 124875;
-    REG32(TCNT0) = 124875;
+    REG32(TCOR0) = TICK_COUNTS - 1;
+    REG32(TCNT0) = TICK_COUNTS - 1;
     REG32(INT2PRI0) = 0x000e0000;
     REG32(INT2MSKCR) = MASK_TMU;
     REG8(TSTR) = 1;

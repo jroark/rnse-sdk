@@ -39,6 +39,9 @@ The script, a line each ('#' starts a comment; numbers in hex):
                                 processor (on from its start)
     wait MS                     (decimal)
     restart | hang | loader     and wait for the monitor to be back
+    caninit N                   the CAN controller set up from reset, variant
+                                N (examples/mon193, can_try); LOST when it
+                                leaves the bus silent (the unit restarts)
     push [FILE]                 a program to the running monitor (default:
                                 the monitor's own file, a newer build)
     toradio CMD [HEX]           a frame to the radio processor (up to four
@@ -452,6 +455,9 @@ def run(argv):
                             raise SystemExit(1)
                     say('%s = back' % cmd)
                     b.log.note('%s: back after %.1f s' % (cmd.upper(), time.time() - t))
+                elif cmd == 'caninit':
+                    st, value, variant, tries = b.ask(13, bytes([number(w[1]), 0, 0, 0, 0, 0]), timeout=3.0, tries=1)[0]
+                    say('%s = works: status %04x after the reset, %04x running, answer at try %d' % (line, value >> 16, value & 0xffff, tries + 1))
                 elif cmd == 'push':
                     # The monitor's file (or the one named) to the
                     # running monitor, which starts it in its place.
