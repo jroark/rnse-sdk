@@ -3,6 +3,17 @@
 Changes to what other repositories depend on (CLAUDE.md, "Interfaces
 other repositories depend on"); releases are tagged.
 
+## Not yet released
+
+- `build.sh`: an example with a file `bare` links none of the kit's
+  code but the files of `src/` that file names, with the example's own
+  start-up code (`*.S`) and `link.ld`. Nothing changes for an example
+  without one.
+- New `examples/side193` (193): a resident beside the stock software,
+  which answers `tools/bench193.py` on CAN while the stock software
+  runs (`docs/side193.md`). It works in the emulator; one run on a
+  bench unit showed two faults that are not fixed.
+
 ## v0.4.0
 
 Sound and the radio processor on the 193, and CAN taken as the stock
