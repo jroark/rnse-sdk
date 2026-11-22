@@ -1,0 +1,52 @@
+# After unstop.script: with the stop bits clear, pages at 0xfc800000
+# and 0xfcc00000-0xfccf0000 answer that read zero before.  Which bit
+# is whose (set again one at a time), and what the blocks hold.
+note all clear
+r32 ffc80030 2
+r32 ffc80044
+r32 fc400000 10
+r32 fc600000 10
+r32 fc800000 10
+r32 fcc00000 10
+note +0x34 bit 0 set again
+w32 ffc80034 1
+r32 fc400000
+r32 fc600000
+r32 fc800000
+r32 fcc00000
+w32 ffc80034 0
+note +0x44 bit 0 set again
+w32 ffc80044 1
+r32 fc400000
+r32 fc600000
+r32 fc800000
+r32 fcc00000
+w32 ffc80044 0
+note +0x30 bit 0 set again
+w32 ffc80030 1
+r32 fc400000
+r32 fc600000
+r32 fc800000
+r32 fcc00000
+note +0x30 bit 1
+w32 ffc80030 2
+r32 fc400000
+r32 fc600000
+r32 fc800000
+r32 fcc00000
+note +0x30 bit 2
+w32 ffc80030 4
+r32 fc400000
+r32 fc600000
+r32 fc800000
+r32 fcc00000
+note +0x30 bit 3
+w32 ffc80030 8
+r32 fc400000
+r32 fc600000
+r32 fc800000
+r32 fcc00000
+w32 ffc80030 0
+note the lower half, every page, all clear
+scan fc000000 fdfff000 1000
+info 7
