@@ -1,0 +1,35 @@
+# Five starts of the unit in a row with nobody at it, the front after
+# each (info 4 bit 0: the faceplate answers; the port with its reset
+# line), and the faceplate's messages for ten seconds.
+front on
+info 4
+restart
+front on
+info 4
+r32 ff909004
+wait 10000
+info 4
+restart
+front on
+info 4
+r32 ff909004
+wait 10000
+info 4
+restart
+front on
+info 4
+r32 ff909004
+wait 10000
+info 4
+restart
+front on
+info 4
+r32 ff909004
+wait 10000
+info 4
+restart
+front on
+info 4
+r32 ff909004
+wait 10000
+info 4

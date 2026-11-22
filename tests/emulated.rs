@@ -1959,6 +1959,292 @@ fn first193_reads_the_unit_and_writes_nothing() {
     }
 }
 
+/// A program of the kit on an emulated 193, started the way the SD
+/// loader (examples/sdload193) hands over to one: at the loader's place,
+/// interrupts blocked, the watchdog left to the program.  No disc: what
+/// such a test is about is the program's own use of the hardware.  None
+/// without a cross compiler.
+fn started_as_by_the_sd_loader_193(example: &str) -> Option<Machine> {
+    use rnse::board::Model;
+    let sdk = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
+    let out = std::process::Command::new("sh").arg(sdk.join("build.sh")).args(["193", example]).output().unwrap();
+    if !out.status.success() {
+        let text = String::from_utf8_lossy(&out.stderr);
+        assert!(text.contains("gcc: not found") || text.contains("gcc: command not found"), "build: {}", text);
+        return None;
+    }
+    let program = std::fs::read(sdk.join(format!("out/{}-193.bin", example))).unwrap();
+    let mut m = Machine::for_model(Model::Rnse193);
+    m.echo_console = false;
+    m.scramble_ram();
+    m.cache_model();
+    m.install_boot_stub("V575");
+    m.board.load(0x09b6_0080, &program);
+    m.cpu.reset();
+    m.cpu.set_sr(0x7000_00f0);
+    m.cpu.pc = u32::from_be_bytes([program[0], program[1], program[2], program[3]]);
+    m.cpu.r[15] = 0x09c5_fff0;
+    m.watchdog_always = true;
+    Some(m)
+}
+
+/// The 193's SD loader (examples/sdload193), as the 192's: a menu of
+/// the card's programs; a 192 program refused; SELECT runs one, and
+/// RETURN held for two seconds in it comes back to the loader with that
+/// program chosen; a program pushed over CAN (canload) starts in the
+/// same way; RETURN held in the loader opens the display, ejects the
+/// disc and starts the unit anew.  The radio processor gets its
+/// keep-alive meanwhile.
+#[test]
+fn sdload193_menu_return_and_can_push() {
+    use rnse::dev::hcan::Frame;
+    let sdk = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
+    let build = |unit: &str, example: &str| -> Option<Vec<u8>> {
+        let out = std::process::Command::new("sh").arg(sdk.join("build.sh")).args([unit, example]).output().unwrap();
+        if !out.status.success() {
+            let text = String::from_utf8_lossy(&out.stderr);
+            assert!(text.contains("gcc: not found") || text.contains("gcc: command not found"), "build: {}", text);
+            return None;
+        }
+        Some(std::fs::read(sdk.join(format!("out/{}-{}.bin", example, unit))).unwrap())
+    };
+    let Some(hello) = build("193", "hello") else { return };
+    let pcm = build("193", "pcmstream").unwrap();
+    let pushed = pcm.clone();
+    let old = build("192", "hello").unwrap();
+    let Some(mut m) = started_as_by_the_sd_loader_193("sdload193") else { return };
+    m.can().start();
+    let card = rnse::fat::card("LOADER", &[rnse::fat::Entry::file("RNSE.BIN", hello.clone()), rnse::fat::Entry::file("PCM.BIN", pcm),
+        rnse::fat::Entry::file("OLD.BIN", old)], None).unwrap();
+    assert!(m.insert_card(0, rnse::dev::sdhi::Card::from_bytes(card).unwrap()));
+    m.atapi().insert(Some(vec![0u8; 64 * 2048]));
+    let ms = m.cycles_per_ms();
+    let text = |m: &Machine| String::from_utf8_lossy(&m.console).into_owned();
+    let records = |m: &mut Machine| -> Vec<[u8; 8]> {
+        let r: Vec<[u8; 8]> = m.can().tx.iter().filter(|f| f.id == 0x7f8 && f.len == 8).map(|f| { let mut d = [0u8; 8]; d.copy_from_slice(&f.data[..8]); d }).collect();
+        m.can().tx.clear();
+        r
+    };
+    let press = |m: &mut Machine, key: &str, hold: u64| {
+        assert!(m.panel_key(key, true));
+        assert_eq!(m.run(hold * ms), Stop::Budget, "{:?}", m.cpu.fault);
+        assert!(m.panel_key(key, false));
+        assert_eq!(m.run(500 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    };
+    assert_eq!(m.run(3_000 * ms), Stop::Budget, "{:?}: {}", m.cpu.fault, text(&m));
+    let r = records(&mut m);
+    assert!(text(&m).contains("rnse sdk: sdload193"), "{}", text(&m));
+    let found: Vec<u8> = r.iter().filter(|d| d[0] == 0x76).map(|d| d[1]).collect();
+    assert!(found.contains(&3), "three programs listed: {:?}", r);
+    // The menu: RNSE.BIN, PCM.BIN, OLD.BIN.  OLD.BIN (a 192 program) is
+    // refused, the loader stays.
+    press(&mut m, "PREV", 200);
+    press(&mut m, "SELECT", 200);
+    let r = records(&mut m);
+    assert!(r.iter().any(|d| d[0] == 0x7a && d[1] == 2 && i32::from_be_bytes([d[2], d[3], d[4], d[5]]) == -20), "{:?}", r);
+    // PCM.BIN: it starts, and RETURN held for two seconds comes back.
+    press(&mut m, "PREV", 200);
+    let at = m.console.len();
+    press(&mut m, "SELECT", 200);
+    assert_eq!(m.run(2_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    assert!(String::from_utf8_lossy(&m.console[at..]).contains("rnse sdk: pcmstream"), "{}", text(&m));
+    let at = m.console.len();
+    press(&mut m, "RETURN", 2_600);
+    assert_eq!(m.run(3_000 * ms), Stop::Budget, "{:?}: {}", m.cpu.fault, text(&m));
+    assert!(String::from_utf8_lossy(&m.console[at..]).contains("rnse sdk: sdload193"), "back at the loader: {}", String::from_utf8_lossy(&m.console[at..]));
+    let r = records(&mut m);
+    assert!(r.iter().any(|d| d[0] == 0x7a && d[1] == 0 && d[5] == 99), "back with RETURN held: {:?}", r);
+    // A short RETURN runs it again (it was the one chosen).
+    assert_eq!(m.run(1_500 * ms), Stop::Budget);
+    let at = m.console.len();
+    press(&mut m, "RETURN", 200);
+    assert_eq!(m.run(1_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    assert!(String::from_utf8_lossy(&m.console[at..]).contains("rnse sdk: pcmstream"), "{}", String::from_utf8_lossy(&m.console[at..]));
+    press(&mut m, "RETURN", 2_600);
+    assert_eq!(m.run(3_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    let _ = records(&mut m);
+    // A program pushed over CAN: pcmstream, started at once.
+    let crc = {
+        let mut c = 0xffff_ffffu32;
+        for &b in &pushed {
+            c ^= u32::from(b);
+            for _ in 0..8 {
+                c = (c >> 1) ^ (0xedb8_8320 & 0u32.wrapping_sub(c & 1));
+            }
+        }
+        !c
+    };
+    let n = pushed.len() as u32;
+    let mut start = vec![1u8, (n >> 16) as u8, (n >> 8) as u8, n as u8];
+    start.extend_from_slice(&crc.to_be_bytes());
+    m.can_frame(Frame::new(0x7f0, &start));
+    let mut a = Vec::new();
+    for _ in 0..20 {
+        assert_eq!(m.run(50 * ms), Stop::Budget);
+        a.extend(records(&mut m));
+        if a.iter().any(|d| d[0] == 0xc0) {
+            break;
+        }
+    }
+    assert!(a.iter().any(|d| d[0] == 0xc0 && d[1] == 1), "{:x?}", a);
+    let frames = (pushed.len() + 6) / 7;
+    let mut k = 0;
+    while k < frames {
+        let end = (k - k % 32 + 32).min(frames);
+        for i in k..end {
+            let mut d = vec![(i & 255) as u8];
+            d.extend_from_slice(&pushed[7 * i..(7 * i + 7).min(pushed.len())]);
+            m.can_frame(Frame::new(0x7f1, &d));
+        }
+        let mut a = Vec::new();
+        for _ in 0..20 {
+            assert_eq!(m.run(50 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+            a.extend(records(&mut m));
+            if a.iter().any(|d| d[0] == 0xc1) {
+                break;
+            }
+        }
+        let (rx, dropped) = (m.can().rx_count, m.can().rx_dropped);
+        let ack = a.iter().rev().find(|d| d[0] == 0xc1).unwrap_or_else(|| panic!("no answer at frame {}: {:x?} rx {} dropped {}", k, a, rx, dropped));
+        assert_eq!(ack[1], 0, "a frame missing at {}", k);
+        let off = u32::from_be_bytes([ack[2], ack[3], ack[4], ack[5]]) as usize;
+        k = if off >= pushed.len() { frames } else { (off + 6) / 7 };
+    }
+    let at = m.console.len();
+    m.can_frame(Frame::new(0x7f0, &[3]));
+    assert_eq!(m.run(1_500 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    assert!(String::from_utf8_lossy(&m.console[at..]).contains("rnse sdk: pcmstream"), "{}", text(&m));
+    // The radio processor has had its keep-alive, the 193's: 8a, from
+    // each program at its start (81 [06] follows a quarter of a minute
+    // on, longer than a program runs here).
+    assert!(m.radio.seen.keys().any(|&(cmd, _)| cmd == 0x8a), "{:?}", m.radio.seen);
+    // Back with RETURN held, then RETURN held in
+    // the loader: the display opens, the disc comes out, a new start.
+    let at = m.console.len();
+    for _ in 0..40 {
+        if String::from_utf8_lossy(&m.console[at..]).contains("rnse sdk: sdload193") {
+            break;
+        }
+        press(&mut m, "RETURN", 2_600);
+    }
+    assert!(String::from_utf8_lossy(&m.console[at..]).contains("rnse sdk: sdload193"), "{}", text(&m));
+    assert_eq!(m.run(2_000 * ms), Stop::Budget);
+    let ejects = m.atapi().ejects;
+    assert!(m.panel_key("RETURN", true));
+    let stop = m.run(15_000 * ms);
+    assert!(m.display_pos() <= 94, "the display is not open: {}", m.display_pos());
+    assert_eq!(m.atapi().ejects, ejects + 1, "the disc did not come out");
+    assert!(stop != Stop::Budget || m.reset_requested || m.cpu.fault.is_some() || text(&m).matches("rnse sdk:").count() > 0, "{:?}", stop);
+}
+
+/// The car driver on a 193 whose CAN controller the stock software set
+/// up (can_attach, which car_init uses): taken as it is, not reset (a
+/// mailbox the stock software programmed keeps its identifier), and the
+/// steering wheel's keys come in through the mailbox it sets up again.
+#[test]
+fn car_driver_attaches_to_the_193_s_controller() {
+    use rnse::dev::hcan::Frame;
+    let Some(mut m) = started_as_by_the_sd_loader_193("car") else { return };
+    // As the stock software leaves it: running, its bit timing, mailbox
+    // 24 for network management (0x400-0x43f), mailbox 5 receiving 0x271.
+    m.can().start();
+    m.can().write(0x100 + 0x20 * 24, 2, 0x400 << 2, 0);
+    m.can().write(0x100 + 0x20 * 24 + 4, 2, 0x3f << 2, 0);
+    m.can().write(0x100 + 0x20 * 24 + 0x10, 2, 0x0300, 0);
+    m.can().write(0x100 + 0x20 * 5, 2, 0x271 << 2, 0);
+    m.can().write(0x100 + 0x20 * 5 + 0x10, 2, 0x0300, 0);
+    let ms = m.cycles_per_ms();
+    let mut reports: Vec<[u8; 4]> = Vec::new();
+    let run = |m: &mut Machine, t: u64, reports: &mut Vec<[u8; 4]>| {
+        assert_eq!(m.run(t * ms), Stop::Budget, "{:?}", m.cpu.fault);
+        for f in m.can().tx.iter().filter(|f| f.id == 0x7f8 && f.len == 4) {
+            reports.push([f.data[0], f.data[1], f.data[2], f.data[3]]);
+        }
+        m.can().tx.retain(|f| f.id != 0x7f8);
+    };
+    run(&mut m, 500, &mut reports);
+    assert!(reports.contains(&[b'I', 0xff, 0, 0]), "{:?}", reports);
+    assert_eq!(m.can().read(0x100 + 0x20 * 5, 2, 0), 0x271 << 2, "the controller was reset");
+    let press = |m: &mut Machine, code: u8| m.can_send_cyclic(Frame::new(0x5c3, &[0x39, code]), 100);
+    press(&mut m, 0x04);
+    run(&mut m, 300, &mut reports);
+    press(&mut m, 0x00);
+    run(&mut m, 300, &mut reports);
+    press(&mut m, 0x06);
+    run(&mut m, 300, &mut reports);
+    press(&mut m, 0x00);
+    run(&mut m, 300, &mut reports);
+    assert!(reports.contains(&[b'K', 19, 1, 0]), "NEXT: {:?}", reports);
+    assert!(reports.contains(&[b'W', 0x06, 0, 0]) && reports.contains(&[b'V', 0, 1, 0]), "volume: {:?}", reports);
+}
+
+/// Sound as a stream of blocks on the 193 (src/pcm.c, the serial sound
+/// interface and its DMA channel; examples/pcmstream): the amplifier
+/// set to the decoder's input over the radio processor's line, 440 Hz
+/// on the left and 880 on the right, then 550 and 1100 with the program
+/// away 30 ms at a time, at 44.1 kHz and without a gap.  Started the
+/// way the SD loader leaves a program (no disc needed: what is tested
+/// is the program's own use of the hardware).
+#[test]
+fn sdk_pcm_streams_on_the_193() {
+    use rnse::dev::radio::Radio;
+    let Some(mut m) = started_as_by_the_sd_loader_193("pcmstream") else { return };
+    let name = "pcmstream-193";
+    let ms = m.cycles_per_ms();
+    let mut waited = 0;
+    m.speaker = Some(Vec::new());
+    let text = loop {
+        assert_eq!(m.run(500 * ms), Stop::Budget, "{}: {:?}", name, m.cpu.fault);
+        let text = String::from_utf8_lossy(&m.console).into_owned();
+        if text.contains("DONE.") {
+            break text;
+        }
+        waited += 1;
+        assert!(waited < 80, "{}: {}", name, text);
+    };
+    let tail = &text[text.len().saturating_sub(1500)..];
+    assert!(text.contains("PCM_START: 0 (OK)") && text.contains("AMPLIFIER: OK"), "{}: {}", name, tail);
+    assert_eq!(m.radio.source, Radio::SOURCE_DECODER, "{}", name);
+    assert_eq!(m.radio.volume, 12, "{}", name);
+    for part in ["PART 1: ", "PART 2 (AWAY 30 MS): "] {
+        let l = text.lines().find(|l| l.starts_with(part)).unwrap_or_else(|| panic!("{}: {}", name, tail));
+        let rate: u32 = l[part.len()..].split(' ').next().unwrap().parse().unwrap();
+        assert!(rate.abs_diff(44_100) <= 100, "{}: {}", name, l);
+        assert!(l.ends_with("GAPS 0"), "{}: {}", name, l);
+    }
+    // Each half second's pitch, left and right: the two pairs of tones
+    // where they belong, each for most of its four seconds.
+    let heard = m.speaker.take().unwrap();
+    let side = |c: usize| -> Vec<u32> {
+        let s: Vec<i16> = heard.iter().skip(c).step_by(2).copied().collect();
+        s.chunks(22_050).map(|c| 2 * c.windows(2).filter(|w| w[0] < 0 && w[1] >= 0).count() as u32).collect()
+    };
+    let (left, right) = (side(0), side(1));
+    for (pitches, want) in [(&left, [440, 550]), (&right, [880, 1100])] {
+        for hz in want {
+            let halves = pitches.iter().filter(|&&p| p.abs_diff(hz) <= 6).count();
+            assert!(halves >= 6, "{}: {} Hz for {} half seconds: left {:?} right {:?}", name, hz, halves, left, right);
+        }
+    }
+    // No break inside a tone: no step between two samples larger than
+    // the sine's.
+    let samples: Vec<i16> = heard.iter().skip(1).step_by(2).copied().collect();
+    let chunks: Vec<&[i16]> = samples.chunks(22_050).collect();
+    for k in 1..chunks.len().saturating_sub(1) {
+        let hz = right[k];
+        if ![880u32, 1100].iter().any(|&f| hz.abs_diff(f) <= 6) || right[k - 1].abs_diff(hz) > 6 || right[k + 1].abs_diff(hz) > 6 {
+            continue;
+        }
+        let peak = chunks[k].iter().map(|v| i32::from(*v).abs()).max().unwrap();
+        let largest = chunks[k].windows(2).map(|w| (i32::from(w[1]) - i32::from(w[0])).abs()).max().unwrap();
+        let slope = (1.4 * 2.0 * std::f64::consts::PI * f64::from(hz) / 44_100.0 * f64::from(peak)) as i32;
+        assert!(peak > 0 && largest <= slope + 2, "{}: {} Hz: a step of {} where its sine of {} has at most {}", name, hz, largest, peak, slope);
+    }
+    assert!(!text.contains("unexpected"), "{}: {}", name, tail);
+    let cache = &m.cpu.cache.trouble;
+    assert_eq!((cache.stale_fetches, cache.dirty_discarded), (0, 0), "{}: {:?}", name, cache);
+}
+
 /// examples/sdload193, the 193's first SD loader, started as the unit
 /// would start it with a card in the first slot: it finds LINKBENC.BIN
 /// (what the SD bridge serves) before RNSE.BIN, starts it, and has
@@ -1970,10 +2256,12 @@ fn sdload193_starts_a_program_from_a_card() {
     let Some(_) = sdk_example(&image, Model::Rnse193, "hello") else { return };
     let sdk = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
     let hello = std::fs::read(sdk.join("out/hello-193.bin")).unwrap();
-    for (file, other) in [("LINKBENC.BIN", None), ("RNSE.BIN", None), ("LINKBENC.BIN", Some("RNSE.BIN"))] {
+    // Started by the stock software from the disc, the loader lists the
+    // card's programs (RNSE.BIN first); SELECT runs the one chosen.
+    for (file, other) in [("RNSE.BIN", None), ("TEST.BIN", Some("RNSE.BIN"))] {
         let mut entries = vec![rnse::fat::Entry::file(file, hello.clone())];
         if let Some(o) = other {
-            entries.push(rnse::fat::Entry::file(o, b"not a program".to_vec()));
+            entries.push(rnse::fat::Entry::file(o, vec![0x55u8; 256])); // not a program, but listed first
         }
         let card = rnse::fat::card("LOADER", &entries, None).unwrap();
         let Some((mut m, name, _)) = started_by_stock_software(&image, Model::Rnse193, "sdload193") else { return };
@@ -1981,10 +2269,27 @@ fn sdload193_starts_a_program_from_a_card() {
         assert!(m.insert_card(0, rnse::dev::sdhi::Card::from_bytes(card).unwrap()));
         let flash = m.board.flash.clone();
         let mut waited = 0;
+        while !m.can().tx.iter().any(|f| f.id == 0x7f8 && f.data[0] == 0x76 && f.data[1] as usize == 1 + other.is_some() as usize) {
+            assert_eq!(m.run(500 * ms), Stop::Budget, "{} {}: {:?}", name, file, m.cpu.fault);
+            waited += 1;
+            assert!(waited < 60, "{} {}: not listed: {:?}", name, file, String::from_utf8_lossy(&m.console));
+        }
+        assert_eq!(m.run(1_500 * ms), Stop::Budget);
+        let press = |m: &mut Machine, key: &str| {
+            assert!(m.panel_key(key, true));
+            assert_eq!(m.run(200 * ms), Stop::Budget);
+            assert!(m.panel_key(key, false));
+            assert_eq!(m.run(300 * ms), Stop::Budget);
+        };
+        if other.is_some() {
+            press(&mut m, "NEXT"); /* past RNSE.BIN, which is not a program */
+        }
+        press(&mut m, "SELECT");
+        waited = 0;
         while !String::from_utf8_lossy(&m.console).contains("rnse sdk: hello") {
             assert_eq!(m.run(500 * ms), Stop::Budget, "{} {}: {:?}", name, file, m.cpu.fault);
             waited += 1;
-            assert!(waited < 60, "{} {}: {:?}", name, file, String::from_utf8_lossy(&m.console));
+            assert!(waited < 20, "{} {}: {:?}", name, file, String::from_utf8_lossy(&m.console));
         }
         assert_eq!(m.run(3_000 * ms), Stop::Budget, "{} {}: {:?}", name, file, m.cpu.fault);
         assert!(String::from_utf8_lossy(&m.console).contains("tick 2"), "{} {}", name, file);
@@ -2002,4 +2307,99 @@ fn crc32(data: &[u8]) -> u32 {
         }
     }
     !c
+}
+
+/// The bench monitor (examples/mon193): reads and writes asked for on
+/// CAN, the flash and the battery-backed memory never written, a read
+/// that takes an exception answered as such with the monitor still
+/// there, a block with its CRC, and a request that hangs it ended by
+/// the watchdog.
+#[test]
+fn mon193_answers_guards_and_recovers() {
+    use rnse::dev::hcan::Frame;
+    let Some(mut m) = started_as_by_the_sd_loader_193("mon193") else { return };
+    m.can().start();
+    let ms = m.cycles_per_ms();
+    assert_eq!(m.run(2_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    assert!(String::from_utf8_lossy(&m.console).contains("rnse sdk: mon193"));
+    assert!(m.can().tx.iter().any(|f| f.id == 0x7f8 && f.data[0] == 0xb1), "the start record");
+    m.can().tx.clear();
+    let mut seq = 0u8;
+    let mut ask = |m: &mut Machine, op: u8, a: u32, x: u8, y: u8| -> Vec<[u8; 8]> {
+        seq = seq.wrapping_add(1);
+        let b = a.to_be_bytes();
+        m.can_frame(Frame::new(0x7f2, &[seq, op, b[0], b[1], b[2], b[3], x, y]));
+        assert_eq!(m.run(100 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+        let r: Vec<[u8; 8]> = m.can().tx.iter().filter(|f| f.id == 0x7f3 && f.data[0] == seq).map(|f| { let mut d = [0u8; 8]; d.copy_from_slice(&f.data[..8]); d }).collect();
+        assert!(!r.is_empty(), "no answer to op {:02x}", op);
+        r
+    };
+    let value = |d: &[u8; 8]| u32::from_be_bytes([d[2], d[3], d[4], d[5]]);
+    // The processor's version register, as the bench 193's.
+    let r = ask(&mut m, 1, 0xff00_0030, 4, 0);
+    assert_eq!((r[0][1], value(&r[0])), (0, 0x1030_0700), "{:x?}", r);
+    // RAM written and read back, four words in one request.
+    let r = ask(&mut m, 2, 0x1234_5678, 0, 0);
+    assert_eq!(r[0][1], 0);
+    let r = ask(&mut m, 3, 0xac10_0000, 4, 0);
+    assert_eq!(r[0][1], 0, "{:x?}", r);
+    let r = ask(&mut m, 1, 0xac10_0000, 2, 2);
+    assert_eq!(r.iter().map(value).collect::<Vec<_>>(), [0x1234, 0x5678], "{:x?}", r);
+    // The flash and the battery-backed memory: refused, and unchanged.
+    let before = (m.peek8(0x0040_0000), m.board.nvram[0x100]);
+    for a in [0x0040_0000u32, 0xa040_0000, 0x1800_0100, 0xb800_0100, 0x03ff_fffe] {
+        let r = ask(&mut m, 3, a, 4, 0);
+        assert_eq!(r[0][1], 2, "a write to {:08x} was not refused: {:x?}", a, r);
+    }
+    assert_eq!((m.peek8(0x0040_0000), m.board.nvram[0x100]), before);
+    // A read that takes an address error: said so, and the monitor
+    // goes on.
+    let r = ask(&mut m, 1, 0xac10_0001, 4, 0);
+    assert_eq!((r[0][1], value(&r[0])), (1, 0x0e0), "{:x?}", r);
+    let r = ask(&mut m, 1, 0xac10_0000, 4, 0);
+    assert_eq!((r[0][1], value(&r[0])), (0, 0x1234_5678), "{:x?}", r);
+    let r = ask(&mut m, 5, 7 << 24, 0, 0);
+    assert_eq!(value(&r[0]), 1, "exceptions counted");
+    // A block and its CRC.
+    m.can().tx.clear();
+    let r = ask(&mut m, 4, 0xac10_0000, 0, 12);
+    let mut bytes = vec![0u8; 12];
+    for f in m.can().tx.iter().filter(|f| f.id == 0x7f9) {
+        let off = (f.data[0] as usize) << 16 | (f.data[1] as usize) << 8 | f.data[2] as usize;
+        for i in 0..5 {
+            if off + i < 12 {
+                bytes[off + i] = f.data[3 + i];
+            }
+        }
+    }
+    assert_eq!(&bytes[..4], &[0x12, 0x34, 0x56, 0x78]);
+    assert_eq!((r[0][1], value(&r[0])), (0, crc32(&bytes)), "{:x?}", r);
+    // The CAN controller set up from reset with its top control bit
+    // kept: the answer comes, the next request is heard, and the unit
+    // is not started again; five seconds later it is still there.
+    let r = ask(&mut m, 13, 3 << 24, 0, 0);
+    assert_eq!((r[0][1], r[0][6]), (0, 3), "{:x?}", r);
+    let r = ask(&mut m, 5, 0, 0, 0);
+    assert_eq!(value(&r[0]) >> 8, 0x4d4f4e, "{:x?}", r);
+    assert_eq!(m.run(6_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    let r = ask(&mut m, 5, 0, 0, 0);
+    assert_eq!(value(&r[0]) >> 8, 0x4d4f4e, "{:x?}", r);
+    // The keys are followed: CD EJECT ejects.
+    m.atapi().insert(Some(vec![0u8; 64 * 2048]));
+    let ejects = m.atapi().ejects;
+    assert!(m.panel_key("CD_EJECT", true));
+    assert_eq!(m.run(500 * ms), Stop::Budget);
+    assert!(m.panel_key("CD_EJECT", false));
+    assert_eq!(m.run(3_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    assert_eq!(m.atapi().ejects, ejects + 1, "CD EJECT was not followed");
+    // Minutes of nothing asked: the watchdog is content.
+    assert_eq!(m.run(20_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    // A hang: the watchdog starts the unit again.
+    seq = seq.wrapping_add(1);
+    m.can_frame(Frame::new(0x7f2, &[seq, 7, b'H', b'A', b'N', b'G', 0, 0]));
+    let stop = m.run(10_000 * ms);
+    // (The emulator ends such a run either way: the watchdog's reset,
+    // or its own notice of a program stopped with interrupts off.)
+    let stopped = m.cpu.fault.as_deref().is_some_and(|f| f.contains("expects the watchdog"));
+    assert!(stop != Stop::Budget && (m.reset_requested || stopped), "the watchdog did not reset a hung monitor: {:?} {:?}", stop, m.cpu.fault);
 }

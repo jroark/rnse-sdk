@@ -22,6 +22,19 @@ kit's CAN code on a unit (examples/canbench).  No packages needed.
           --script FILE        timed lines: "MS ID:HEX[@PERIOD]", "MS stop ID",
                                "MS mark TEXT" (MS from the start)
           --for S              stop after S seconds
+          --push-loader FILE   whenever an SD loader of the 193 starts that is
+                               not FILE's kind (its 0x7f8 record 0x70 without
+                               bit 7 in its item), send it FILE, a newer
+                               loader, as a program; and whenever one of
+                               FILE's kind starts afresh (item 0x80), send
+                               --push's FILE: with the disc's older loader
+                               on a unit, every start ends in the newer one
+                               and the program, no disc and no card swapped
+          --push FILE          send FILE (a program's image) to the running
+                               program whenever its contents change, the
+                               first time at the start: the kit's canload
+                               (src/can.c) takes it and starts it, no reset
+                               (tried again every 5 s while nobody answers)
     canbench.py bench PORT LOG
         The check of examples/canbench running on the unit: waits for its
         state frame, sends frames of every length at rising rates, checks
@@ -229,6 +242,13 @@ def run(argv):
     stop_at = None
     nm = None
     nm_due = []          # (time, data) of our ring messages
+    push_path = None
+    loader_path = None
+    loader_due = None    # 'loader' or 'program': what a loader's start asks for
+    loader_next = 0.0
+    tries_left = 10
+    pushed = None        # the contents last taken by the unit
+    push_next = 0.0      # when to look at the file (or try again)
     i = 0
     while i < len(opts):
         o = opts[i]
@@ -259,9 +279,21 @@ def run(argv):
         elif o == '--for':
             i += 1
             stop_at = float(opts[i])
+        elif o == '--push':
+            i += 1
+            push_path = opts[i]
+        elif o == '--push-loader':
+            i += 1
+            loader_path = opts[i]
         elif o != '--listen':
             sys.exit('unknown option %s' % o)
         i += 1
+    if loader_path and push_path:
+        # Loader starts decide when the program goes out, not this start.
+        try:
+            pushed = open(push_path, 'rb').read()
+        except OSError:
+            pass
     bus = Slcan(dev, listen)
     log = Log(path)
     log.note('CANable %s, %s' % (bus.version, 'listen only' if listen else 'acknowledging'))
@@ -275,9 +307,97 @@ def run(argv):
         send(fid, data)
     if nm is not None:
         send(0x400 | nm, bytes([nm, 0x01, 0, 0, 0, 0]))
+    def service():
+        # The cyclic frames (the ignition) and the log, while a push waits.
+        now = log.t()
+        for fid, c in cyclic.items():
+            if c[2] <= now:
+                c[2] = now + c[1]
+                send(fid, c[0])
+
+    def answers(timeout, want):
+        # The unit's canload records (0x7f8, first byte 0xc0-0xc2) until
+        # one for which want(record) is true, or the time is up.
+        end = log.t() + timeout
+        while log.t() < end:
+            service()
+            for fid, d in bus.frames(0.002):
+                log.frame('rx', fid, d)
+                if fid == 0x7f8 and len(d) == 8 and 0xc0 <= d[0] <= 0xc2 and want(d):
+                    return d
+        return None
+
+    def push(image):
+        import zlib
+        size, crc = len(image), zlib.crc32(image) & 0xffffffff
+        send(0x7f0, bytes([1, size >> 16 & 255, size >> 8 & 255, size & 255]) + crc.to_bytes(4, 'big'))
+        r = answers(1.0, lambda d: d[0] == 0xc0)
+        if r is None:
+            return 'no program answered'
+        if r[1] != 1:
+            return 'refused (%02x)' % r[1]
+        log.note('PUSH %d bytes, crc %08x' % (size, crc))
+        frames = (size + 6) // 7
+        k, start, tries = 0, log.t(), 0
+        while k < frames:
+            # Up to the unit's next acknowledgement: every 32 frames.
+            end = min(k - k % 32 + 32, frames)
+            for n in range(k, end):
+                send(0x7f1, bytes([n & 255]) + image[7 * n:7 * n + 7])
+            want = min(7 * end, size)
+            r = answers(1.0, lambda d: d[0] == 0xc1 and (d[1] == 0xff or int.from_bytes(d[2:6], 'big') >= want))
+            if r is None:
+                tries += 1
+                if tries > 5:
+                    send(0x7f0, b'\x04')
+                    return 'no answer at frame %d' % k
+                continue
+            tries = 0
+            off = int.from_bytes(r[2:6], 'big')
+            k = (off + 6) // 7 if off < size else frames
+        send(0x7f0, b'\x03')
+        r = answers(2.0, lambda d: d[0] == 0xc2)
+        if r is None:
+            return 'sent in %.1f s, no answer to the end' % (log.t() - start)
+        return 'sent in %.1f s: %s' % (log.t() - start, {0: 'started', 1: 'CRC wrong', 2: 'not started'}.get(r[1], '?'))
+
     try:
         while stop_at is None or log.t() < stop_at:
             now = log.t()
+            if loader_due and now >= loader_next:
+                what, loader_due = loader_due, None
+                path = loader_path if what == 'loader' else push_path
+                try:
+                    image = open(path, 'rb').read() if path else None
+                except OSError:
+                    image = None
+                if image:
+                    result = push(image)
+                    log.note('PUSH %s (%s at a loader start): %s' % (path, what, result))
+                    if result.endswith('started'):
+                        if what == 'program':
+                            pushed = image
+                        tries_left = 10
+                    elif tries_left > 0:
+                        # Not taken (the loader busy at its slots, say):
+                        # again in two seconds, ten times at most.
+                        tries_left -= 1
+                        loader_due, loader_next = what, log.t() + 2
+                now = log.t()
+            if push_path and now >= push_next:
+                push_next = now + 1
+                try:
+                    image = open(push_path, 'rb').read()
+                except OSError:
+                    image = None
+                if image and image != pushed:
+                    result = push(image)
+                    log.note('PUSH %s: %s' % (push_path, result))
+                    if result.endswith('started'):
+                        pushed = image
+                    else:
+                        push_next = log.t() + 5
+                now = log.t()
             while script and script[0][0] <= now:
                 _, cmd = script.pop(0)
                 if cmd.startswith('mark '):
@@ -299,6 +419,11 @@ def run(argv):
                 send(0x400 | nm, nm_due.pop(0)[1])
             for fid, d in bus.frames(0.005):
                 log.frame('rx', fid, d)
+                if loader_path and fid == 0x7f8 and len(d) == 8 and d[0] == 0x70:
+                    if not d[1] & 0x80:
+                        loader_due = 'loader'
+                    elif d[1] == 0x80 and push_path:
+                        loader_due = 'program'
                 if nm is not None and 0x400 <= fid <= 0x43f and len(d) >= 2 and fid != 0x400 | nm:
                     sender = fid & 0x3f
                     if d[0] == nm and d[1] & 0x03 == 0x02:

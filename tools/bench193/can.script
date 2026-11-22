@@ -1,0 +1,7 @@
+# The CAN controller (RCAN-ET) whole: its registers and all 32
+# mailboxes (identifier, mask, data, control at +0x10), read only.
+r16 ffdf0000 10
+r16 ffdf0020 20
+r16 ffdf0100 ff
+r16 ffdf02fe ff
+r16 ffdf04fc 2

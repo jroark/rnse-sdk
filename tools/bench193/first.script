@@ -1,0 +1,33 @@
+# The first run on a unit: the monitor itself, the processor's
+# identity, the front (faceplate, display), and the CAN controller as
+# the stock software and the loader left it.  Reads only.
+info 0
+info 2
+info 3
+info 6
+r32 ff000030            # PVR
+r32 ff000040 2          # CVR, PRR
+r32 ff00001c            # CCR
+info 4                  # the front: faceplate, display state and position
+front on
+# The CAN controller (RCAN-ET): control, status, bit timing, interrupts
+r16 ffdf0000 8
+# transmit pending / cancel / acknowledge / abort, receive pending,
+# remote, mailbox interrupt mask, unread message
+r16 ffdf0020 2
+r16 ffdf0028 2
+r16 ffdf0030 2
+r16 ffdf0038 2
+r16 ffdf0040 2
+r16 ffdf0048 2
+r16 ffdf0050 2
+r16 ffdf0058 2
+# mailbox 31, the stock software's catch-all (does it hold an unread
+# message while mailbox 24 below it receives?), 24 and 1
+r16 ffdf04e0 a
+r16 ffdf0400 a
+r16 ffdf0120 a
+wait 3000
+info 4
+info 5                  # CAN frames lost
+info 7

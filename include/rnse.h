@@ -64,8 +64,8 @@ void screen_fill(int x, int y, int w, int h, u8 colour);
  * at (x, y).  On the 192, x, w, pitch and the address multiples of 4
  * go a word at a time. */
 /* Per unit (hw192.c, hw193.c): whether panel_service follows the
- * display key (not yet on the 193, whose motor lines are assumed; a
- * program that tests the motor, examples/display, sets it), and
+ * display key (both units; on the 193 since v0.4.0, its motor lines
+ * read off the stock software), and
  * whether the drive's port is the stock software's when a program
  * starts (the 193: cd_eject then uses it as it is). */
 extern int display_key_followed;
@@ -340,16 +340,25 @@ int firmware_installed(void);
 void firmware_healthy(void);
 void firmware_guard(u32 arg);
 
-/* The radio processor (192): tuner, amplifier and power.  A command
+/* The radio processor (192 and 193): tuner, amplifier and power.  A command
  * with its data; the answer's data goes to `answer` and its length is
  * returned, negative when no answer came in three tries. */
 int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max);
-/* The radio processor's keep-alive, 81 [06], as the stock software sends
- * it once a minute: without it a unit restarts into the stock software
- * after about seven minutes.  Call it often (panel_service does): it
- * sends at the first call and then when a minute has passed, and takes
- * some 6 ms when it does.  192 only. */
+/* A frame the radio processor sends unasked: its command (-1: none within
+ * ms), its data in data (n of them, at most max). */
+int radio_listen(u8 *data, int max, int *n, u32 ms);
+/* 20 [00] to the radio processor: its frame taken. */
+void radio_ack(void);
+/* The radio processor's keep-alive, as the stock software sends it:
+ * 81 [06] once a minute on the 192, 8a every 30 s and 81 [06] every 60
+ * on the 193.  Without it a unit restarts into the stock software, a
+ * 192 after about seven minutes, a 193 after about thirteen and a
+ * half.  Call it often (panel_service does): it sends at the first
+ * call and then when the time has passed, and takes some 6 ms when it
+ * does. */
 void radio_keepalive(void);
+/* Set, radio_keepalive sends nothing (for finding out what a unit wants). */
+extern int radio_keepalive_off;
 #define RADIO_CD 1
 #define RADIO_TUNER 3
 #define RADIO_DECODER 4
@@ -423,6 +432,13 @@ void cd_data_write(u16 w);
  * until can_receive asks; can_lost counts those there was no room for
  * or that the controller itself had to drop. */
 void can_init(void);
+/* For a program the stock software started (the SD loaders): the
+ * controller taken as that software left it, no reset, its bit timing
+ * kept, and set up to receive everything as can_init does.  On the 193,
+ * where can_init left a unit's bus silent, this is the way; on the 192
+ * it is can_init.  (On the 193, receiving this way has yet to be seen
+ * on a unit.) */
+void can_attach(void);
 /* 0 = sent and acknowledged by another node; -1 = not within 100 ms
  * (nobody else on the bus, or the bus is down), and given up. */
 int can_send(u16 id, const u8 *data, int len);
@@ -435,6 +451,18 @@ int can_send_for(u16 id, const u8 *data, int len, u32 us);
  * data stored; -1 when there is none. */
 int can_receive(u16 *id, u8 *data);
 u32 can_lost(void);
+/* A new program over the bus (src/can.c, tools/canbench.py run ...
+ * --push FILE): canload_init gives a buffer of max bytes that the
+ * running program does not use; every received frame then goes to
+ * canload_frame (it returns 1 for the loader's own, 0x7f0 and 0x7f1),
+ * or canload_poll takes them from can_receive itself.  A whole image
+ * with the right CRC is started with run_image, loader_leave first. */
+void canload_init(void *buffer, u32 max);
+/* What starts it, when set (the SD loader: loader_run, so that RETURN
+ * held comes back to it); run_image otherwise. */
+extern int (*canload_start)(void *image, u32 bytes);
+int canload_frame(u16 id, const u8 *data, int len);
+void canload_poll(void);
 /* The controller's state: its general status register (GSR) in the
  * upper half, the transmit error counter in bits 15..8 and the receive
  * error counter in bits 7..0.  In GSR, as Renesas' HCAN2 has it, bit 0
@@ -578,7 +606,15 @@ void cache_setup(u32 ccr);
  * whether it is still at it.  The samples must stay where they are
  * until then.  pcm_stop puts the processor back into reset (a card in
  * its slot wants sd_init after that).  pcm_start returns 0, or below 0
- * when the processor did not take its program (or on the 193). */
+ * when the processor did not take its program.
+ *
+ * The 193 (also src/pcm.c) has one output of its own, the serial sound
+ * interface, at 44.1 kHz into the same amplifier input (RADIO_DECODER):
+ * pcm_start (whatever dsp says) and the streams, pcm_stream with its
+ * blocks, work there; pcm_put, pcm_dma and pcm_loop return below 0.
+ * The 193 takes no interrupt for it: the ring moves on when the
+ * program calls pcm_stream_block or pcm_stream_ready, which it must do
+ * at least once a block. */
 int pcm_start(int dsp);
 int pcm_put(const s16 *lr, u32 frames);
 /* Called by pcm_put every 2048 samples, when set (to panel_service): a
@@ -607,6 +643,9 @@ int pcm_stream(s16 *buf, u32 frames, u32 blocks);
 s16 *pcm_stream_block(void);
 void pcm_stream_ready(void);
 void pcm_stream_stop(void);
+/* How often, since pcm_stream, the next block was not ready in time
+ * and a silence was heard. */
+extern u32 pcm_gaps;
 /* A sound card's way: the ring played round and round by the DMA
  * controller with nothing to say a block is ready, and pcm_loop_pos
  * the frame (0 .. frames * blocks - 1) it plays now, so that a program

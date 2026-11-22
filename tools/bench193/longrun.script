@@ -1,0 +1,10 @@
+# Thirty-one minutes under the monitor with its keep-alive, nothing
+# asked: the unit must not start again (the monitor's clock at the end
+# is its uptime, and says whether the clock keeps the world's time).
+push
+info 0
+info 1
+wait 1860000
+info 1
+info 4
+info 9

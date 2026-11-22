@@ -112,7 +112,8 @@ void car_poll(void)
 
 void car_init(void)
 {
-    can_init();
+    /* (can_attach: on the 193 can_init left a unit's bus silent.) */
+    can_attach();
     ignition = -1;
     wheel = 0;
     q_head = q_tail = 0;

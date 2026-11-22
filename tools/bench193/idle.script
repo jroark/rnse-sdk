@@ -1,0 +1,10 @@
+# Thirteen minutes of nothing asked and nothing sent to the radio
+# processor: does the unit start again by itself (a bench 193 did after
+# about nine and a half under a program without a keep-alive), and what
+# does the radio processor say before it does?
+info 1
+keepalive off
+radio on
+wait 780000
+info 1
+info 4

@@ -1,0 +1,10 @@
+# A start of the unit with nobody at it: the monitor restarts it, the
+# stock software starts, the disc's loader takes over, the monitor is
+# pushed again.  The front before and after (info 4: bit 0 the
+# faceplate answers), and the port with the faceplate's reset line.
+info 4
+r32 ff909000 2
+restart
+info 4
+r32 ff909000 2
+info 1

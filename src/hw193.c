@@ -57,6 +57,16 @@ const u32 way_back_marker = 0;
 
 const int screen_width = 800, screen_height = 480;
 
+/* The timers count a quarter of the peripheral clock: 12.462 MHz on a
+ * bench 193 (249.3 million counts in 20.00 s on two channels, and a
+ * clock of this kit's 3.8 s behind the world after 31 minutes at the
+ * 12.4876 MHz taken before, which is the stock software's 12488 counts
+ * for its millisecond; mon193, 2026-11-21).  A peripheral clock of
+ * 49.85 MHz, then: one and a half times a crystal of 33.23 MHz, which
+ * is what the one beside the chip, marked D332K, may well be.  Counts
+ * in 10 ms: */
+#define TICK_COUNTS 124620u
+
 static volatile u32 ticks;
 static u32 strobe;
 volatile int watchdog_hold;
@@ -65,8 +75,15 @@ void interrupt(void)
 {
     u32 code = REG32(INTEVT);
     if (code == 0x400) {
-        /* Timer 0 underflow: every 10 ms. */
+        /* Timer 0 underflow: every 10 ms.  The flag is read back after
+         * it is cleared: the request takes a moment to go, and on a
+         * bench 193 this handler, short as it is, was back at once for
+         * the same underflow, every time: the kit's clock ran twice as
+         * fast as the world's (40 s counted in 20, the timer itself
+         * counting 12.46 MHz as it should; mon193, 2026-11-21). */
         REG16(TCR0) &= (u16)~0x0100;
+        (void)REG16(TCR0);
+        (void)REG16(TCR0);
         ticks += 10;
         /* The watchdog wants an edge on its strobe regularly; the stock
          * loader toggles it from this tick as well. */
@@ -101,8 +118,8 @@ u32 micros(void)
         t = ticks;
         c = REG32(TCNT0);
     } while (t != ticks);
-    /* The timer counts 124875 down to 0 in 10 ms: 12.5 a microsecond. */
-    return t * 1000 + udiv((124875 - c) * 2, 25);
+    /* The timer counts TICK_COUNTS - 1 down to 0 in 10 ms. */
+    return t * 1000 + udiv((TICK_COUNTS - 1 - c) * 100, TICK_COUNTS / 100);
 }
 
 void console_putc(char c)
@@ -166,21 +183,24 @@ void screen_blit(int x, int y, int w, int h, const u8 *pixels, int pitch)
 
 /* The fold-down display (docs/hardware-193.md, "A/D converter and
  * ports").  The port at 0xff93f000 (direction +4, output +8, input
- * +0xc): output bits 19 and 18 drive the motor, input bit 20 is low
- * only when the display is fully open.  Which of the two bits closes is
- * assumed (19), as in the emulator's model: nothing here has been tried
- * on a real 193.  The position is input 4 of the converter at
- * 0xff93c000. */
+ * +0xc): output bit 18 opens, bit 19 closes, input bit 20 is low only
+ * when the display is fully open.  Which bit does what is read off the
+ * stock software's display key (V575 1050, 0x805faa22: a closed display
+ * gets bit 18 and bit 19 cleared, an open one bit 19 and bit 18
+ * cleared, either reverses a run the other way; 0x805fa742 stops at
+ * position 94 with bit 20 low, or 894); a bench 193 had both lines as
+ * outputs and off, bit 20 high and position 979 with its display closed
+ * (examples/first193, 2026-11-20).  The position is input 4 of the
+ * converter at 0xff93c000. */
 #define MOTOR_PORT 0xff93f000
 #define MOTOR_OPEN (1u << 18)
 #define MOTOR_CLOSE (1u << 19)
 #define ADC 0xff93c000
 
 const int display_input = 4;
-/* Which of the motor lines opens is assumed: the display key is not
- * followed on the 193 until it has been measured on a unit (the
- * display opened by hand on the bench; CD EJECT works). */
-int display_key_followed = 0;
+/* The display key opens and closes the display, as on the 192 (the
+ * hardware rules: every program must let the disc out). */
+int display_key_followed = 1;
 const int cd_port_set_up_at_start = 1;
 
 void display_port_init(void)
@@ -353,7 +373,13 @@ void cd_data_write(u16 w)
 void can_init(void)
 {
     int n;
-    REG16(CAN + 0x00) = 0x0001; /* reset */
+    /* (The control register's top bit stays set, as the stock software
+     * has it, 0x8000: with it cleared the controller has a mailbox's
+     * identifier two bits further up, and a bench 193 set up by this
+     * code with 1 and 0 here sent 0x7f8 as 0x1fe and took no frame for
+     * what it was; with 0x8001 and 0x8000 it talked and listened as
+     * before.  mon193's can_try, 2026-11-21.) */
+    REG16(CAN + 0x00) = 0x8001; /* reset */
     REG16(CAN + 0x08) = 0x0001;
     /* Interrupts: the loader's mask is 0xfebd, which lets the end of a
      * transmission through as well; this code waits for that itself and
@@ -371,10 +397,38 @@ void can_init(void)
     REG16(CAN_MB(CAN_RX) + 0x04) = 0x1ffc; /* whatever the identifier */
     REG16(CAN + 0x06) = 0x000b;            /* bit timing */
     REG16(CAN + 0x04) = 0xb730;
-    REG16(CAN + 0x00) = 0x0000; /* run */
+    REG16(CAN + 0x00) = 0x8000; /* run */
     REG16(CAN + 0x50) = (u16)~(1 << (CAN_RX - 16)); /* that mailbox's interrupt */
     REG16(CAN + 0x52) = 0xffff;
     /* Level and mask in the interrupt controller as the loader has them. */
+    REG32(INT2PRI0 + 0x14) = 0x000a0000;
+    REG32(INT2MSKCR) = 0x02000000;
+}
+
+/* The controller as the stock software left it, for a program it
+ * started: no reset and the bit timing untouched (the bench 193's bus
+ * stayed silent after can_init, and sending through the controller as
+ * it was left worked: examples/sdload193).  Only mailbox 24 is set up
+ * again, out of use while its identifier and mask change, to receive
+ * whatever comes, and only its interrupt let through, as can_init has
+ * it.  Mailbox 1 sends, as with can_init.  A controller without a bit
+ * timing has not been set up by anybody: then can_init. */
+void can_attach(void)
+{
+    /* Nobody set it up (a program started in the loader's place by the
+     * boot ROM, or in the emulator): can_init's way, then. */
+    if (!REG16(CAN + 0x04) && !REG16(CAN + 0x06)) {
+        can_init();
+        return;
+    }
+    REG16(CAN_MB(CAN_RX) + 0x10) = 0x0700; /* out of use */
+    REG16(CAN_MB(CAN_RX) + 0x00) = 0;
+    REG16(CAN_MB(CAN_RX) + 0x04) = 0x1ffc; /* whatever the identifier */
+    REG16(CAN_MB(CAN_RX) + 0x10) = 0x0300; /* receives */
+    REG16(CAN + 0x58) = (u16)(1 << (CAN_RX - 16)); /* nothing lost yet */
+    REG16(CAN + 0x40) = (u16)(1 << (CAN_RX - 16)); /* nothing waiting */
+    REG16(CAN + 0x50) = (u16)~(1 << (CAN_RX - 16));
+    REG16(CAN + 0x52) = 0xffff;
     REG32(INT2PRI0 + 0x14) = 0x000a0000;
     REG32(INT2MSKCR) = 0x02000000;
 }
@@ -622,12 +676,10 @@ void board_init(void)
 
     STEP(10);
     /* The tick: timer 0 at a quarter of the 50 MHz peripheral clock
-     * (49.95 MHz going by the stock software's 12488 counts for its
-     * 1 ms), 124876 counts = 10 ms, interrupt level 7.  (The stock
-     * loader's own tick, 62438 counts, is 5 ms.) */
+     * (TICK_COUNTS, above), interrupt level 7. */
     REG16(TCR0) = 0x0020;
-    REG32(TCOR0) = 124875;
-    REG32(TCNT0) = 124875;
+    REG32(TCOR0) = TICK_COUNTS - 1;
+    REG32(TCNT0) = TICK_COUNTS - 1;
     REG32(INT2PRI0) = 0x000e0000;
     REG32(INT2MSKCR) = MASK_TMU;
     REG8(TSTR) = 1;
@@ -682,6 +734,34 @@ static u16 sdhi_clock;
  * MB/s at 0, 1.48 at 1).  Takes effect at the next sdhi_start. */
 u16 sdhi_fast_clock = 0x0000;
 
+/* The program's idle work (sd_idle: the faceplate answered) while the
+ * SD host waits, at most every millisecond and never from inside itself.
+ * Without it a card's start (a slot switch of 50 ms, its readiness polled
+ * in steps of 20 ms, each command's answer waited for up to 500 ms) left
+ * the faceplate unanswered, and a bench 193 whose program started its
+ * cards again and again (the viewer without a bridge, the menu loader
+ * looking at its slots) went dark, faceplate, screen and keys, for good
+ * (2026-11-21). */
+static void sdhi_idle(void)
+{
+    static int inside;
+    static u32 last;
+    u32 now = millis();
+    if (!sd_idle || inside || now == last)
+        return;
+    last = now;
+    inside = 1;
+    sd_idle();
+    inside = 0;
+}
+
+static void sdhi_delay(u32 ms)
+{
+    u32 start = millis();
+    while (millis() - start < ms)
+        sdhi_idle();
+}
+
 static int sdhi_wait(u32 reg, u16 bits, u16 errors, u32 ms)
 {
     u32 start = millis();
@@ -693,6 +773,7 @@ static int sdhi_wait(u32 reg, u16 bits, u16 errors, u32 ms)
             return 0;
         if (millis() - start > ms)
             return -0x10000;
+        sdhi_idle();
     }
 }
 
@@ -784,7 +865,7 @@ int sdhi_start(int slot)
     REG16(SD_SELECT) = (u16)(slot & 1);
     sdhi_clock = 0x0020;             /* slow while the card starts, as stock */
     REG16(SD_CLK) = 0;
-    delay_ms(50);
+    sdhi_delay(50);
     sdhi_command(0x0000, 0, 0);      /* CMD0 */
     e = sdhi_command(0x0008, 0x1aa, &r); /* CMD8: version 2 if it answers */
     v2 = e == 0 && (r & 0xfff) == 0x1aa;
@@ -800,7 +881,7 @@ int sdhi_start(int slot)
             break;
         if (millis() - start > 1500)
             return -5;
-        delay_ms(20);
+        sdhi_delay(20);
     }
     sdhi_ccs = v2 && (r & 0x40000000);
     if (sdhi_command(0x0002, 0, 0))  /* CMD2 */

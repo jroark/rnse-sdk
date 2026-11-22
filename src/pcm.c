@@ -23,7 +23,11 @@
  *
  * The processor's card interface is not used by this program: a card
  * in that slot cannot be read while it plays (pcm_stop, then sd_init).
- * See sdbridge/docs/android-auto.md. */
+ * See sdbridge/docs/android-auto.md.
+ *
+ * The 193 (further down, "The 193") has a sound output of its own, a
+ * serial sound interface fed by a DMA channel, and plays the same
+ * streams (pcm_stream) through it. */
 #include "rnse.h"
 
 #define STATUS 0xb2400001 /* bits 2, 0: nothing to read; 3, 1: cannot take a word */
@@ -66,6 +70,113 @@ static const u32 program[] = {
 
 static int which = -1;
 
+/* The 193: the system-on-chip's serial sound interface (SSI) at
+ * 0xff984000, fed 32-bit words (the left sample in the high half, the
+ * right one in the low half: in this big-endian memory, a stereo
+ * sample of the kit's left-then-right s16 pairs as it is) by DMA
+ * channel 3, which has two sets of source, destination and count and
+ * goes on from one to the other by itself (rnse docs/hardware-193.md,
+ * "DMA channels", "Sound output").  The registers are written as the
+ * stock software's sound driver writes them to start an MP3 file at
+ * 44.1 kHz (seen in the emulator, V575: the audio clock, the
+ * interface's set-up, the channel's mode, the sets with physical
+ * source addresses, the channel run, then the interface on).  Unlike
+ * that driver this code takes no interrupt: the channel's end-of-set
+ * interrupt (INTEVT 0x980) is switched off at its source, and the next
+ * block is loaded into the free set whenever the program asks for a
+ * block to fill (pcm_stream_block) or hands one over
+ * (pcm_stream_ready), which it must do at least once a block.  When
+ * the channel has run dry it is started again from the next ready
+ * block (pcm_gaps counts those times). */
+#define SSI 0xff984000
+#define SSI_SETUP 0x000bc532  /* 44.1 kHz, as the stock driver; off */
+#define SSI_ON 0x10000001     /* DMA, enabled (the driver also enables its
+                                 underflow and overflow interrupts: not here) */
+#define AUDIO_CLOCK 0xff972000
+#define AUDIO_CLOCK_44K 0x3dff
+#define ADMA 0xff801180       /* channel 3 */
+#define ADMA_COMMON 0xff801400
+#define ADMA_BIT 0x40         /* channel 3's bit in the common registers */
+#define ADMA_MODE 0x05050022
+
+u32 pcm_gaps;
+static int on_193;
+static int set_block[2] = { -1, -1 }; /* ring block in the first, second set */
+
+static void adma_load(int second, const s16 *lr, u32 frames)
+{
+    u32 set = ADMA + (second ? 0x0c : 0);
+    REG32(set + 0) = (u32)lr & 0x1fffffff;
+    REG32(set + 4) = SSI + 8;
+    REG32(set + 8) = frames;
+}
+
+static void adma_halt(void)
+{
+    REG32(ADMA + 0x30) = 1;
+    REG32(ADMA + 0x2c) = 0;
+    REG32(SSI) = SSI_SETUP;
+    REG32(SSI + 4) = 0;
+    REG32(ADMA_COMMON + 0x14) = ADMA_BIT;
+}
+
+static u32 ring_next_play; /* the next block to be played, in ring order */
+static s16 *ring;
+static u32 ring_frames, ring_blocks, ring_fill;
+static volatile u8 ring_ready[PCM_STREAM_MAX];
+
+/* Frees the blocks the channel is done with and loads the next ones. */
+static void service_193(void)
+{
+    u32 status;
+    int second, b;
+    if (!ring)
+        return;
+    status = REG32(ADMA + 0x34);
+    if (REG32(ADMA_COMMON + 0x10) & ADMA_BIT)
+        REG32(ADMA_COMMON + 0x14) = ADMA_BIT;
+    if (!(status & 1)) {
+        /* Not running: both sets are done. */
+        for (second = 0; second < 2; second++)
+            if (set_block[second] >= 0) {
+                ring_ready[set_block[second]] = 0;
+                set_block[second] = -1;
+            }
+        if (!ring_ready[ring_next_play])
+            return;
+        if (REG32(SSI) & 1)
+            pcm_gaps++;
+        /* As the stock driver starts: the interface off, the channel
+         * set up and running, the interface on. */
+        REG32(SSI) = SSI_SETUP;
+        REG32(SSI + 4) = 0;
+        REG32(ADMA + 0x28) = ADMA_MODE;
+        b = (int)ring_next_play;
+        adma_load(0, ring + 2 * ring_frames * (u32)b, ring_frames);
+        set_block[0] = b;
+        ring_next_play = (ring_next_play + 1) % ring_blocks;
+        REG32(ADMA + 0x2c) = 1;
+        REG32(SSI) = SSI_SETUP | SSI_ON;
+        status = REG32(ADMA + 0x34);
+    }
+    if (!(status & 1) || (status & 2))
+        return;
+    /* Running with nothing loaded behind the set in use: the other set
+     * is free, and the block that was in it has been played. */
+    second = (status & 0x40) ? 1 : 0;
+    if (set_block[second] >= 0) {
+        ring_ready[set_block[second]] = 0;
+        set_block[second] = -1;
+    }
+    if (!ring_ready[ring_next_play])
+        return;
+    b = (int)ring_next_play;
+    adma_load(second, ring + 2 * ring_frames * (u32)b, ring_frames);
+    set_block[second] = b;
+    ring_next_play = (ring_next_play + 1) % ring_blocks;
+    REG32(ADMA + 0x2c) = 3;
+}
+
 static int put_word(int n, u16 w, u32 ms)
 {
     u32 until = millis() + ms;
@@ -76,10 +187,98 @@ static int put_word(int n, u16 w, u32 ms)
     return 0;
 }
 
+/* The 193's sound path around the interface, as the stock software's
+ * sound driver opens and closes it (V575 1050: its open at 0x8062bae0,
+ * its close at 0x8062bb6a, its one-time set-up at 0x8062b9bc; read off
+ * the code and the emulator's log of it, 2026-11-21):
+ *
+ *   - 0xff9900b8 bit 4 on (after the key at 0xff900864): the interface's
+ *     module.  Without it the interface takes no write (the bench 193:
+ *     its control register read 0 after 0x100bc533 was written);
+ *   - port 0xff909000 bit 29 low, a moment, high: a line out to the
+ *     sound path, low while closed;
+ *   - 0xff90301c = 0x1b;
+ *   - GPIO 0xff93e008 bit 13 low while playing, high when closed (a
+ *     mute, by all appearances; the driver's set-up makes it an output,
+ *     0xff93e004 bit 13).
+ *
+ * The one-time set-up (the ports, the mute an output and on, and the
+ * audio block at 0xff985000/0xff986000 that the software's start makes
+ * with 0xff9900b8 bits 5 and 6) is the stock software's: a program it
+ * started finds it made.  Only when those bits are off (a program that
+ * nothing set up, such as one the boot ROM starts) is the block's part
+ * made here, as that start makes it. */
+#define AUDIO_KEY 0xff900864
+#define AUDIO_MODULES 0xff9900b8
+#define AUDIO_PORT 0xff909000      /* bit 29 */
+#define AUDIO_MUTE_DIR 0xff93e004  /* bit 13 */
+#define AUDIO_MUTE 0xff93e008      /* bit 13 */
+
+static void audio_key(void)
+{
+    if (!(REG32(AUDIO_KEY) & 1))
+        REG32(AUDIO_KEY) = 0xf0a50f5a;
+}
+
+static void audio_open_193(void)
+{
+    if ((REG32(AUDIO_MODULES) & 0x60) != 0x60) {
+        REG32(AUDIO_CLOCK) = 0x3c00;
+        REG16(0xff973000) = 0x0012;
+        audio_key();
+        REG32(AUDIO_MODULES) |= 0x40;
+        REG32(0xff986000) = 0x0009d533;
+        REG32(AUDIO_MODULES) |= 0x20;
+        REG32(0xff985000) = 0x00091100;
+        REG32(0xff986010) = 1;
+        REG32(0xff986014) = 0x20;
+        REG32(0xff986018) = 0x20;
+        REG32(0xff986008) = 0;
+        REG32(0xff986004) = 0;
+        REG32(AUDIO_MUTE_DIR) |= 0x2000;
+        REG32(AUDIO_MUTE) |= 0x2000;
+    }
+    audio_key();
+    /* Bit 2 of the port's data (0xff909004), which the driver's one-time
+     * set-up clears: high on the bench 193 when the stock software had
+     * played a card's MP3 before handing over, and with it the sound
+     * came out; low and silent otherwise (2026-11-21).  Being tried
+     * again: its first trial was confounded (the bridge was out, and
+     * without it the viewer's front went dark whatever it did). */
+    REG32(AUDIO_PORT + 4) |= 0x4;
+    REG32(AUDIO_PORT) &= ~0x20000000u;
+    delay_ms(1);
+    REG32(AUDIO_PORT) |= 0x20000000u;
+    delay_ms(1);
+    REG32(AUDIO_MODULES) |= 0x10;
+    REG32(0xff90301c) = 0x1b;
+    REG32(SSI) = SSI_SETUP;
+    REG32(AUDIO_MUTE) &= ~0x2000u;
+}
+
+static void audio_close_193(void)
+{
+    REG32(SSI) &= 0xe3ff3ffe;
+    REG32(ADMA + 0x30) = 1;
+    REG32(AUDIO_MUTE) |= 0x2000;
+    REG32(AUDIO_PORT) &= ~0x20000000u;
+}
+
 int pcm_start(int n)
 {
     u32 i, count = sizeof program / sizeof program[0];
-    if (screen_width != 400 || n < 0 || n > 1)
+    if (screen_width != 400) {
+        /* The 193: one output, whatever n says. */
+        pcm_stop();
+        REG32(ADMA_COMMON + 0x18) &= ~(u32)(ADMA_BIT | ADMA_BIT << 1);
+        adma_halt();
+        audio_open_193();
+        REG32(AUDIO_CLOCK) = AUDIO_CLOCK_44K;
+        REG32(ADMA + 0x28) = ADMA_MODE;
+        on_193 = 1;
+        return 0;
+    }
+    if (n < 0 || n > 1)
         return -1;
     pcm_stop();
     REG32(LATCH) &= ~(4u << n);
@@ -178,11 +377,8 @@ int pcm_dma_busy(void)
 #define IPRC 0xffd0000c
 #define SILENCE 256
 static s16 silence[2 * SILENCE] __attribute__((aligned(32)));
-static s16 *ring;
-static u32 ring_frames, ring_blocks, ring_fill;
 static volatile int ring_play = -1;
 static volatile u32 ring_want;
-static volatile u8 ring_ready[PCM_STREAM_MAX];
 static int ring_loop;
 
 static void arm(const s16 *lr, u32 frames)
@@ -212,6 +408,8 @@ void pcm_interrupt(void)
         ring_play = (int)ring_want;
         arm(ring + 2 * ring_frames * ring_want, ring_frames);
     } else {
+        if (p >= 0)
+            pcm_gaps++;
         ring_play = -1;
         arm(silence, SILENCE);
     }
@@ -220,17 +418,21 @@ void pcm_interrupt(void)
 int pcm_stream(s16 *buf, u32 frames, u32 blocks)
 {
     u32 a, i;
-    if (which < 0 || blocks < 2 || blocks > PCM_STREAM_MAX || ((u32)buf & 31) || (frames & 7))
+    if ((which < 0 && !on_193) || blocks < 2 || blocks > PCM_STREAM_MAX || ((u32)buf & 31) || (frames & 7))
         return -1;
     pcm_stream_stop();
-    ring = buf;
     ring_frames = frames;
     ring_blocks = blocks;
     ring_fill = 0;
     ring_want = 0;
     ring_play = -1;
+    ring_next_play = 0;
+    pcm_gaps = 0;
     for (i = 0; i < blocks; i++)
         ring_ready[i] = 0;
+    ring = buf;
+    if (on_193)
+        return 0;
     for (i = 0; i < 2 * SILENCE; i++)
         silence[i] = 0;
     for (a = (u32)silence; a < (u32)silence + sizeof silence; a += 32)
@@ -244,6 +446,8 @@ int pcm_stream(s16 *buf, u32 frames, u32 blocks)
 
 s16 *pcm_stream_block(void)
 {
+    if (on_193)
+        service_193();
     if (!ring || ring_ready[ring_fill])
         return 0;
     return ring + 2 * ring_frames * ring_fill;
@@ -261,12 +465,16 @@ void pcm_stream_ready(void)
         __asm__ volatile("ocbwb @%0" : : "r"(a) : "memory");
     ring_ready[ring_fill] = 1;
     ring_fill = (ring_fill + 1) % ring_blocks;
+    if (on_193)
+        service_193();
 }
 
 int pcm_loop(s16 *buf, u32 frames, u32 blocks)
 {
     u32 a, i;
     int r;
+    if (on_193)
+        return -1; /* (not yet: pcm_stream only) */
     /* Nothing of the ring left in the cache: a dirty line written back
      * later would put old samples over the program's. */
     for (a = (u32)buf & ~31u; a < (u32)buf + 4 * frames * blocks; a += 32)
@@ -305,6 +513,11 @@ void pcm_stream_stop(void)
         return;
     ring = 0;
     ring_loop = 0;
+    if (on_193) {
+        adma_halt();
+        set_block[0] = set_block[1] = -1;
+        return;
+    }
     REG16(IPRC) &= (u16)~0x0f00;
     if (which >= 0) {
         REG32(dma[which] + 12) = 0x00080020;
@@ -317,6 +530,13 @@ void pcm_stream_stop(void)
 void pcm_stop(void)
 {
     int i;
+    if (on_193) {
+        pcm_stream_stop();
+        adma_halt();
+        audio_close_193();
+        on_193 = 0;
+        return;
+    }
     if (which < 0)
         return;
     pcm_stream_stop();

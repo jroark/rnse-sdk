@@ -1,0 +1,19 @@
+# The tuner and the amplifier through the radio processor, with the
+# kit's frames (radio_tune, radio_volume), checked in the status block
+# it sends by itself (bytes 4 and 5 the frequency in 50 kHz, 33 the
+# source, 34 the volume).  A unit left on FM 88.9 (06 f2) at volume 14:
+# to 101.1 (07 e6), volume 10, and back.
+info 0
+radio on
+wait 4000
+toradio 82 03 02 07 e6
+wait 4000
+toradio 19 01 0a
+wait 4000
+toradio 82 03 02 06 f2
+wait 3000
+toradio 19 01 0e
+wait 4000
+radio off
+info 4
+info 9
