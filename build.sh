@@ -44,7 +44,11 @@ fi
 objdir=out/objects-$example-$unit
 mkdir -p "$objdir"
 # EXTRA_CFLAGS: for instance -DWAIT=5 for the probe.
-cflags="-g -mb -m4-nofpu -Os -ffreestanding -fno-builtin -fno-pic -fno-stack-protector -Wall -Wextra -Iinclude $EXTRA_CFLAGS"
+# (-ffunction-sections, -fdata-sections and the linker's --gc-sections:
+# what a program never calls of the kit is left out of it.  Every
+# program used to carry all of the kit, and on the 192, whose place is
+# 128 KiB, the larger ones no longer fitted.)
+cflags="-g -mb -m4-nofpu -Os -ffreestanding -fno-builtin -fno-pic -fno-stack-protector -ffunction-sections -fdata-sections -Wall -Wextra -Iinclude $EXTRA_CFLAGS"
 # An example that uses code of third_party/ (its file `libs`, below)
 # sees that code's headers.  A line with a slash in it is a directory
 # relative to the example's own (code kept beside a program in a
@@ -98,11 +102,11 @@ done
 for lib in $libs; do
     for src in "$lib"/*.c; do
         obj=$objdir/$(basename "$lib")-$(basename "$src" .c).o
-        ${CROSS}gcc -g -mb -m4-nofpu -O2 -ffreestanding -fno-builtin -fno-pic -fno-stack-protector \
+        ${CROSS}gcc -g -mb -m4-nofpu -O2 -ffreestanding -fno-builtin -fno-pic -fno-stack-protector -ffunction-sections -fdata-sections \
             -Ithird_party/libc -I"$lib" $EXTRA_CFLAGS -c -o "$obj" "$src"
         objs="$objs $obj"
     done
 done
-${CROSS}ld -EB --no-warn-rwx-segments -T $script --defsym LOAD=$load --defsym SIZE=$size -o out/$example-$unit.elf $objs
+${CROSS}ld -EB --no-warn-rwx-segments --gc-sections -T $script --defsym LOAD=$load --defsym SIZE=$size -o out/$example-$unit.elf $objs
 ${CROSS}objcopy -O binary out/$example-$unit.elf out/$example-$unit.bin
 ls -l out/$example-$unit.bin

@@ -722,10 +722,12 @@ void board_init(void)
 #define INFO2_ERRORS 0x807f /* CRC, end bit, timeouts, illegal access */
 #define INFO2_TIMEOUT 0x0040
 #define INFO2_READ 0x0100   /* a block can be read from the data port */
+#define INFO2_WRITE 0x0200  /* a block can be written to the data port */
 #define INFO2_BUSY 0x4000 /* the command line is in use */
 
 void (*sdhi_trace)(int cmd, u32 arg, u32 response, int result);
 static int sdhi_ccs, sdhi_slot = -1;
+static u32 sdhi_rca;
 static u16 sdhi_clock;
 /* The clock's divider once a card has started (bits 7..0 of +0x24: 0
  * half the interface's clock, 1 a quarter, 2 an eighth, ...); the stock
@@ -889,6 +891,7 @@ int sdhi_start(int slot)
     if (sdhi_command(0x0003, 0, &r)) /* CMD3: the card's address */
         return -7;
     r &= 0xffff0000;
+    sdhi_rca = r;
     sdhi_clock = sdhi_fast_clock;    /* faster from here */
     if (sdhi_command(0x0007, r, 0))  /* CMD7: selected */
         return -8;
@@ -940,6 +943,55 @@ int sdhi_read_multi(u32 sector, u32 count, void *buf)
     REG16(SD_INFO1) = (u16)~INFO1_ACCESS;
     REG16(SDHI + 0x08) = 0;
     return r ? -4 : 0;
+}
+
+/* As sdhi_read_multi the other way: CMD25, the host counting the
+ * blocks and ending with CMD12; each block goes to the data port when
+ * INFO2 bit 9 asks for one.  Then CMD13 until the card is ready for data
+ * again in its transfer state (it is busy while it programs).  Written
+ * from the layout of Toshiba's and Renesas' SD hosts; on the emulator
+ * only so far. */
+int sdhi_write_multi(u32 sector, u32 count, const void *buf)
+{
+    const u8 *in = buf;
+    u32 b, status = 0, start;
+    int i, r;
+    if (sdhi_slot < 0)
+        return -1;
+    if (count == 0)
+        return 0;
+    REG16(SD_SIZE) = 512;
+    REG16(SDHI + 0x08) = 0x0100;     /* block count on: CMD12 by the host */
+    REG16(SDHI + 0x0a) = (u16)count;
+    if (sdhi_command(0x0019, sdhi_ccs ? sector : sector << 9, &status) || (status & 0xfdf90000)) { /* CMD25 */
+        REG16(SDHI + 0x08) = 0;
+        return -2;
+    }
+    for (b = 0; b < count; b++) {
+        r = sdhi_wait(SD_INFO2, INFO2_WRITE, INFO2_ERRORS, 500);
+        if (r) {
+            REG16(SDHI + 0x08) = 0x0001; /* stop */
+            REG16(SDHI + 0x08) = 0;
+            return -(int)(0x100 + b);
+        }
+        REG16(SD_INFO2) = (u16)~INFO2_WRITE;
+        for (i = 0; i < 256; i++)
+            REG16(SD_DATA) = (u16)(in[2 * i] << 8 | in[2 * i + 1]);
+        in += 512;
+    }
+    r = sdhi_wait(SD_INFO1, INFO1_ACCESS, INFO2_ERRORS, 1000);
+    REG16(SD_INFO1) = (u16)~INFO1_ACCESS;
+    REG16(SDHI + 0x08) = 0;
+    if (r)
+        return -4;
+    start = millis();
+    for (;;) {
+        if (sdhi_command(0x000d, sdhi_rca, &status) == 0 /* CMD13 */
+            && (status & 0x100) && ((status >> 9) & 15) == 4)
+            return 0;
+        if (millis() - start > 1000)
+            return -5;
+    }
 }
 
 int sdhi_read(u32 sector, void *buf)

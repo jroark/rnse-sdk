@@ -39,6 +39,8 @@ The script, a line each ('#' starts a comment; numbers in hex):
                                 processor (on from its start)
     wait MS                     (decimal)
     restart | hang | loader     and wait for the monitor to be back
+    starve MS                   the watchdog not served for MS milliseconds
+                                (decimal); LOST when it resets the unit
     cdinit | cdready MS         the kit's cd_init, cd_wait_ready: the result
     cdread SECTOR [N]           N sectors (up to 4) by cd_read: its result
                                 and the CRC-32 of what it read
@@ -463,6 +465,10 @@ def run(argv):
                             raise SystemExit(1)
                     say('%s = back' % cmd)
                     b.log.note('%s: back after %.1f s' % (cmd.upper(), time.time() - t))
+                elif cmd == 'starve':
+                    ms = int(w[1])
+                    b.ask(15, ms.to_bytes(4, 'big') + b'\0\0', timeout=ms / 1000 + 2, tries=1)
+                    say('%s = survived' % line)
                 elif cmd in ('cdinit', 'cdready'):
                     arg = int(w[1]) if len(w) > 1 else 0
                     st, value, _, _ = b.ask(14, arg.to_bytes(4, 'big') + bytes([0, 1 if cmd == 'cdinit' else 2]), timeout=arg / 1000 + 15, tries=1)[0]

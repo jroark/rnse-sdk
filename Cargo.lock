@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "rnse"
 version = "0.1.0"
-source = "git+https://github.com/jroark/rnse?rev=66b95e7df6bb6c4ff7a35dbbf7e6f353d402ac38#66b95e7df6bb6c4ff7a35dbbf7e6f353d402ac38"
+source = "git+https://github.com/jroark/rnse?rev=0735724f7963e1871b801efcbce6dfb38a72b9bb#0735724f7963e1871b801efcbce6dfb38a72b9bb"
 
 [[package]]
 name = "rnse-sdk"

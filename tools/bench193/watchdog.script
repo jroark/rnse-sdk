@@ -1,0 +1,17 @@
+# How long the external watchdog allows: the monitor leaves it
+# unserved for longer and longer.  A step it does not survive is LOST,
+# the unit starts again, and the steps after it show the same.
+push
+info 0
+starve 100
+starve 200
+starve 400
+starve 600
+starve 800
+starve 1000
+starve 1200
+starve 1400
+starve 1600
+starve 2000
+starve 3000
+info 0
