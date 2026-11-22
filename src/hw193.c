@@ -65,8 +65,15 @@ void interrupt(void)
 {
     u32 code = REG32(INTEVT);
     if (code == 0x400) {
-        /* Timer 0 underflow: every 10 ms. */
+        /* Timer 0 underflow: every 10 ms.  The flag is read back after
+         * it is cleared: the request takes a moment to go, and on a
+         * bench 193 this handler, short as it is, was back at once for
+         * the same underflow, every time: the kit's clock ran twice as
+         * fast as the world's (40 s counted in 20, the timer itself
+         * counting 12.46 MHz as it should; mon193, 2026-11-21). */
         REG16(TCR0) &= (u16)~0x0100;
+        (void)REG16(TCR0);
+        (void)REG16(TCR0);
         ticks += 10;
         /* The watchdog wants an edge on its strobe regularly; the stock
          * loader toggles it from this tick as well. */

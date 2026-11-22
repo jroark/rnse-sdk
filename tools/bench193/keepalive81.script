@@ -4,6 +4,7 @@
 # (A fresh start first, so that the minutes count from one.)
 restart
 info 0
+keepalive off
 info 1
 info 4
 toradio 81 06

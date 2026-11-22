@@ -2114,9 +2114,10 @@ fn sdload193_menu_return_and_can_push() {
     m.can_frame(Frame::new(0x7f0, &[3]));
     assert_eq!(m.run(1_500 * ms), Stop::Budget, "{:?}", m.cpu.fault);
     assert!(String::from_utf8_lossy(&m.console[at..]).contains("rnse sdk: pcmstream"), "{}", text(&m));
-    // Nothing of the radio processor's keep-alive kind on the 193 (81
-    // [06] and 8a each turned a bench 193's screen and faceplate off).
-    assert!(!m.radio.seen.keys().any(|&(cmd, first)| cmd == 0x8a || (cmd == 0x81 && first == 0x06)), "{:?}", m.radio.seen);
+    // The radio processor has had its keep-alive, the 193's: 8a, from
+    // each program at its start (81 [06] follows a quarter of a minute
+    // on, longer than a program runs here).
+    assert!(m.radio.seen.keys().any(|&(cmd, _)| cmd == 0x8a), "{:?}", m.radio.seen);
     // Back with RETURN held, then RETURN held in
     // the loader: the display opens, the disc comes out, a new start.
     let at = m.console.len();

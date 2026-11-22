@@ -36,6 +36,9 @@
  *             on 0x7F6: offset, length, six bytes).  Nothing is sent
  *             to it
  *   0a LOADER   "BACK": back to the loader (as RETURN held)
+ *   0c KEEPALIVE  1 or 0: the radio processor's keep-alive sent or not
+ *             (it is, from the start: without it the unit starts again
+ *             after some thirteen minutes)
  *   0b TORADIO  command (1), length (1, up to 4), data: a frame to the
  *             radio processor (radio_command); the answer's first four
  *             bytes, then radio_command's result and the answer's
@@ -53,7 +56,7 @@
  * (panel_service), and a program pushed over CAN replaces it. */
 #include "rnse.h"
 
-#define VERSION 2
+#define VERSION 3
 #define REQUEST 0x7f2
 #define ANSWER 0x7f3
 #define FRONT 0x7f4
@@ -341,6 +344,10 @@ static void request(const u8 *d)
         radio_on = d[2] & 1;
         out(ANSWER, seq, 0, (u32)radio_on, 0, 0);
         break;
+    case 0x0c:
+        radio_keepalive_off = !(d[2] & 1);
+        out(ANSWER, seq, 0, (u32)!radio_keepalive_off, 0, 0);
+        break;
     case 0x0b: {
         u8 answer[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
         n = d[3] > 4 ? 4 : d[3];
@@ -393,7 +400,6 @@ int main(void)
     int len;
 
     __asm__ volatile("stc sr, %0" : "=r"(sr));
-    radio_keepalive_off = 1;
     board_init();
     /* From here on the watchdog is this loop's. */
     watchdog_hold = 1;

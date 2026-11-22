@@ -349,12 +349,13 @@ int radio_command(u8 cmd, const u8 *data, int n, u8 *answer, int max);
 int radio_listen(u8 *data, int max, int *n, u32 ms);
 /* 20 [00] to the radio processor: its frame taken. */
 void radio_ack(void);
-/* The radio processor's keep-alive, 81 [06], as the stock software sends
- * it once a minute: without it a unit restarts into the stock software
- * after about seven minutes.  Call it often (panel_service does): it
- * sends at the first call and then when a minute has passed, and takes
- * some 6 ms when it does.  192 only: on a bench 193 every such frame
- * (81 [06], 8a) turned screen, faceplate and keys off (2026-11-21). */
+/* The radio processor's keep-alive, as the stock software sends it:
+ * 81 [06] once a minute on the 192, 8a every 30 s and 81 [06] every 60
+ * on the 193.  Without it a unit restarts into the stock software, a
+ * 192 after about seven minutes, a 193 after about thirteen and a
+ * half.  Call it often (panel_service does): it sends at the first
+ * call and then when the time has passed, and takes some 6 ms when it
+ * does. */
 void radio_keepalive(void);
 /* Set, radio_keepalive sends nothing (for finding out what a unit wants). */
 extern int radio_keepalive_off;

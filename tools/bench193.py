@@ -35,8 +35,12 @@ The script, a line each ('#' starts a comment; numbers in hex):
     info N                      the monitor's item N (examples/mon193)
     front on|off                the faceplate's messages into the log
     radio on|off                the radio processor's unasked frames too
+    keepalive on|off            the monitor's keep-alive to the radio
+                                processor (on from its start)
     wait MS                     (decimal)
     restart | hang | loader     and wait for the monitor to be back
+    push [FILE]                 a program to the running monitor (default:
+                                the monitor's own file, a newer build)
     toradio CMD [HEX]           a frame to the radio processor (up to four
                                 bytes of data) and its answer
     send ID HEX                 a frame of our own onto the bus
@@ -420,8 +424,8 @@ def run(argv):
                     item = number(w[1])
                     st, value, _, _ = b.ask(5, bytes([item, 0, 0, 0, 0, 0]))[0]
                     say('info %x = %s' % (item, '%08x' % value if st == 0 else status_text(st, value)))
-                elif cmd in ('front', 'radio'):
-                    b.ask(8 if cmd == 'front' else 9, bytes([1 if w[1] == 'on' else 0, 0, 0, 0, 0, 0]))
+                elif cmd in ('front', 'radio', 'keepalive'):
+                    b.ask({'front': 8, 'radio': 9, 'keepalive': 12}[cmd], bytes([1 if w[1] == 'on' else 0, 0, 0, 0, 0, 0]))
                     say('%s %s' % (cmd, w[1]))
                 elif cmd == 'wait':
                     end = time.time() + int(w[1]) / 1000
@@ -448,6 +452,15 @@ def run(argv):
                             raise SystemExit(1)
                     say('%s = back' % cmd)
                     b.log.note('%s: back after %.1f s' % (cmd.upper(), time.time() - t))
+                elif cmd == 'push':
+                    # The monitor's file (or the one named) to the
+                    # running monitor, which starts it in its place.
+                    starts = b.starts
+                    result = b.push(open(w[1] if len(w) > 1 else b.monitor, 'rb').read())
+                    t = time.time()
+                    while b.starts == starts and time.time() - t < 10:
+                        b.poll(0.02)
+                    say('push = %s' % ('started' if b.starts != starts else result))
                 elif cmd == 'toradio':
                     data = bytes.fromhex(''.join(w[2:]))
                     st, value, r, got = b.ask(11, bytes([number(w[1]), len(data)]) + data.ljust(4, b'\0'), timeout=4.0, tries=1)[0]

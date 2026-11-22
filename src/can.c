@@ -78,11 +78,17 @@ int (*canload_start)(void *image, u32 bytes);
 static u8 *load_buf;
 static u32 load_max, load_size, load_crc, load_off, load_frames;
 static int load_on, load_nak;
+static u32 load_nak_at;
 
 static void load_say(u8 a, u8 b, u32 v, u16 w)
 {
     u8 d[8] = { a, b, (u8)(v >> 24), (u8)(v >> 16), (u8)(v >> 8), (u8)v, (u8)(w >> 8), (u8)w };
-    can_send_for(0x7f8, d, 8, 3000);
+    int i;
+    /* (Up to three times: on a bench 193 one such frame in thirty did
+     * not get out in its time, and a push stopped for good where the
+     * one lost said which frame was missing.) */
+    for (i = 0; i < 3 && can_send_for(0x7f8, d, 8, 3000) != 0; i++)
+        ;
 }
 
 static u32 load_crc32(const u8 *p, u32 n)
@@ -143,8 +149,11 @@ int canload_frame(u16 id, const u8 *d, int len)
     if (d[0] != (u8)load_frames) {
         /* One went missing (or this is one sent again after it): from
          * the first that did not come, once per window. */
-        if ((u8)(d[0] - (u8)load_frames) < 0x80 && !load_nak) {
+        if ((u8)(d[0] - (u8)load_frames) < 0x80 && (!load_nak || millis() - load_nak_at >= 300)) {
+            /* (Said again when wrong frames still come after a while:
+             * the sender did not hear it.) */
             load_nak = 1;
+            load_nak_at = millis();
             load_say(0xc1, 0xff, load_off, (u16)load_frames);
         }
         return 1;

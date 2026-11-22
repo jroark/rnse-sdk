@@ -86,58 +86,6 @@ static int frame(u8 *data, int max, int *n, u32 ms)
     return cmd;
 }
 
-/* The keep-alive: the stock software sends the radio processor 81 [06]
- * once a minute, every minute, and nothing else regularly; a unit
- * running a program that sent it nothing (the SD loader's menu, Linux)
- * was restarted into the stock software after about seven minutes.
- * What the frame means is not known.  It is sent here as the stock
- * software sends it, transmitter on only for the frame, without waiting
- * for the acknowledgement (radio_command throws away whatever it finds
- * waiting): some 6 ms of the line at most, so that panel_service can do
- * it between two blocks of sound.  The first call sends at once. */
-int radio_keepalive_off;
-
-void radio_keepalive(void)
-{
-    /* The 192: 81 [06] once a minute.  The 193: 8a every 30 s, which is
-     * what its software sends over and over (V575 10AA in the emulator:
-     * at 0.3, 3.5 and 33.5 s); its 81 [06] comes once, early in its
-     * start, and sent to a running bench 193 it put the unit in a state
-     * with screen, faceplate and keys dark (2026-11-21). */
-    static const u8 frame192[6] = { 0x01, 0x81, 0x00, 0x01, 0x06, 0x76 };
-    static const u8 frame193[5] = { 0x01, 0x8a, 0x00, 0x00, 0x74 };
-    const u8 *frame = ON_192 ? frame192 : frame193;
-    int n = ON_192 ? 6 : 5;
-    static u32 last;
-    static int sent;
-    u16 control;
-    u32 start;
-    int i;
-    /* Not on the 193: every build that sent it a frame of this kind
-     * (81 [06], then 8a) left a bench 193 with screen, faceplate and keys
-     * dark from that moment; the builds that sent none kept it lit
-     * (2026-11-21).  What a 193 wants against its restart after some
-     * nine and a half minutes is still to be found. */
-    if (!ON_192 || radio_keepalive_off || (sent && millis() - last < 60000u))
-        return;
-    sent = 1;
-    last = millis();
-    control = UART(0x04);
-    UART(0x08) = UART(0x08) & 0xffc7;
-    UART(0x04) = (u16)((control | 0x0030) & ~0x00c4);
-    for (i = 0; i < n; i++) {
-        start = millis();
-        while ((UART(0x08) & 0x0200) && millis() - start < 20)
-            ;
-        put_byte(frame[i]);
-    }
-    /* Status bit 2: the last bit has left the line. */
-    start = millis();
-    while (!(UART(0x08) & 0x0004) && millis() - start < 20)
-        ;
-    UART(0x04) = control;
-}
-
 /* A frame to the radio processor as it is (start byte, command, length,
  * data and checksum already in it), the transmitter on only for it, as
  * the stock software sends; nothing waited for. */
@@ -158,6 +106,60 @@ static void send_raw(const u8 *frame, int n)
     while (!(UART(0x08) & 0x0004) && millis() - start < 20)
         ;
     UART(0x04) = control;
+}
+
+/* The keep-alive.  The 192's stock software sends the radio processor
+ * 81 [06] once a minute, every minute, and nothing else regularly; a
+ * unit running a program that sent it nothing (the SD loader's menu,
+ * Linux) was restarted into the stock software after about seven
+ * minutes.  The 193's sends 8a every 30 s and 81 [06] every 60 (V575 in
+ * the emulator), and a bench 193 under examples/mon193 (2026-11-21):
+ *
+ *   - sent nothing, started again after 806 s;
+ *   - sent 81 [06] once a minute, started again 900 s after the first,
+ *     at the moment the sixteenth went out;
+ *   - sent both as the stock software does, was up after 25 minutes,
+ *     when the run ended.
+ *
+ * Its front (screen, faceplate, keys) stayed lit through each: what was
+ * once put down to these frames (a dark front) was the faceplate's
+ * start left unanswered.  So both go out on the 193, 8a at once and
+ * every 30 s, 81 [06] a quarter of a minute after it and every 60 s.
+ * What the frames mean is not known.  Each is sent as the stock
+ * software sends it, transmitter on only for the frame, without waiting
+ * for the answer (radio_command throws away whatever it finds waiting):
+ * some 6 ms of the line at most, so that panel_service can do it
+ * between two blocks of sound. */
+int radio_keepalive_off;
+
+void radio_keepalive(void)
+{
+    static const u8 frame81[6] = { 0x01, 0x81, 0x00, 0x01, 0x06, 0x76 };
+    static const u8 frame8a[5] = { 0x01, 0x8a, 0x00, 0x00, 0x74 };
+    static u32 last81, last8a;
+    static int sent81, sent8a;
+    u32 now = millis();
+    if (radio_keepalive_off)
+        return;
+    if (ON_192) {
+        if (sent81 && now - last81 < 60000u)
+            return;
+        sent81 = 1;
+        last81 = now;
+        send_raw(frame81, 6);
+        return;
+    }
+    if (!sent8a || now - last8a >= 30000u) {
+        if (!sent8a)
+            last81 = now - 45000u; /* its first a quarter of a minute on */
+        sent8a = 1;
+        last8a = now;
+        send_raw(frame8a, 5);
+    } else if (now - last81 >= 60000u) {
+        sent81 = 1;
+        last81 = now;
+        send_raw(frame81, 6);
+    }
 }
 
 /* The acknowledgement the radio processor gives our settings, 20 [00],

@@ -1,0 +1,187 @@
+# Both frames the stock software sends the radio processor over and
+# over (the emulated V575: 8a every 30 s, 81 [06] every 60 s), for 25
+# minutes after a fresh start.  With 81 [06] alone a bench 193 started
+# again 900 s after the first one, at the sixteenth; with nothing sent,
+# after 806 s.  The front after each (info 4 bit 0).
+restart
+info 0
+keepalive off
+info 4
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+toradio 8a
+toradio 81 06
+info 4
+wait 30000
+toradio 8a
+info 4
+wait 30000
+info 1
+info 4
+info 9
