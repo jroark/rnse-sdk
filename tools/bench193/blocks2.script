@@ -1,0 +1,33 @@
+# After blocks.script on a unit (2026-11-22): no page faults, an absent
+# page reads zero.  More of the blocks that answered and nothing uses,
+# and of the clock block, whose +0x34 reads 1: on the R-Car H1 bit 0 of
+# that register stops the USB host's clock.  Reads only.
+note clock block
+r32 ffc80000 40
+note USB host candidates, more of each page
+r32 ffe70000 10
+r32 ffe70080 10
+r32 ffe70400 10
+r32 ffe70800 20
+r32 fff70000 10
+r32 fff70400 10
+note unknown blocks that answer
+r32 ffe92000 10
+r32 ffe94000 10
+r32 ffe95000 10
+r32 ffe96000 10
+r32 fffa0000 10
+r32 ff952000 10
+r32 ff92d000 10
+r32 ff990000 10
+r32 ff931000 8
+r32 fc110000 8
+r32 fc400000 8
+r32 fcd80000 8
+r32 fcda0000 8
+r32 ff2c0000 8
+r32 ff2c1000 8
+r32 ff2c8000 8
+r32 ff200000 8
+r32 ff300000 8
+info 7
