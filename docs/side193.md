@@ -88,7 +88,7 @@ repository).
 ## How it is hooked in
 
 * The stock application calls the program's first entry and then its
-  third.  The third copies the resident (2.4 KiB of code) to
+  third.  The third copies the resident (about 2 KiB of code) to
   0x8bff0000, writes the copy back from the data cache and drops the
   lines from the instruction cache, clears its variables and calls
   `side_init`.
@@ -162,7 +162,43 @@ resident at all.
   resident switched off, the stock software otherwise running.
 
 So a program that returns must not let the application copy it over
-that heap.  Nothing has been built or tried for that.
+that heap.
+
+### The fix to build
+
+This needs a relocated, short module image.  Moving only the stack
+does not fix it: the application has already copied the module over
+the heap before either of the program's entries runs.  The current
+called piece already uses the application's stack for only four saved
+registers, and the resident switches to its own stack on every tick.
+
+The unused RAM measured above leaves room for the two parts without
+using the heap:
+
+* Link the short called piece at 0x0bfe0000, in the 64 KiB immediately
+  below the resident.  Keep the resident at 0x8bff0000 (physical
+  0x0bff0000), including its private stack.
+* Make the copy of LDM on the disc say 0x0bfe0000 in its header word
+  0x70.  Put only the header and the actual side193 image in header
+  word 0x74's length and recompute its checksum over that length.  The
+  directory entry can retain the stock module's padded allocation.
+  `rnse custom` currently preserves the stock LDM load address and
+  length, so it needs this relocation support before such a disc can
+  be made.
+* Let the third entry copy the resident upward to 0x8bff0000 as it
+  does now, clear its variables, install the tick hook and return.
+  The called piece can continue using the application task's stack
+  for its short call because that stack is outside both side193
+  regions and is restored before the return.
+
+Before putting this on a unit, an emulator test must show that the old
+LDM range at 0x09b60000 is not replaced by the module, its heap block
+headers remain the same as a stock control run, NAV and RADIO still
+answer after the return, and taking the disc out and putting it back
+does not make a second resident or change the stock tick handler saved
+by the first one.  The first hardware trial should then repeat
+`tools/bench193/side.script`, exercise NAV and RADIO, and keep physical
+display opening and disc ejection available.
 
 ## The stock software's interrupts and CAN mailboxes (emulator)
 
