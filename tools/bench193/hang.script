@@ -1,0 +1,11 @@
+# The watchdog's part of the loop: the monitor stops serving anything,
+# the unit must start again by itself and the monitor come back.  Then
+# what the radio processor says unasked for half a minute.
+info 1
+hang
+info 1
+info 4
+radio on
+wait 30000
+radio off
+info 4

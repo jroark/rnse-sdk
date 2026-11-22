@@ -2307,3 +2307,88 @@ fn crc32(data: &[u8]) -> u32 {
     }
     !c
 }
+
+/// The bench monitor (examples/mon193): reads and writes asked for on
+/// CAN, the flash and the battery-backed memory never written, a read
+/// that takes an exception answered as such with the monitor still
+/// there, a block with its CRC, and a request that hangs it ended by
+/// the watchdog.
+#[test]
+fn mon193_answers_guards_and_recovers() {
+    use rnse::dev::hcan::Frame;
+    let Some(mut m) = started_as_by_the_sd_loader_193("mon193") else { return };
+    m.can().start();
+    let ms = m.cycles_per_ms();
+    assert_eq!(m.run(2_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    assert!(String::from_utf8_lossy(&m.console).contains("rnse sdk: mon193"));
+    assert!(m.can().tx.iter().any(|f| f.id == 0x7f8 && f.data[0] == 0xb1), "the start record");
+    m.can().tx.clear();
+    let mut seq = 0u8;
+    let mut ask = |m: &mut Machine, op: u8, a: u32, x: u8, y: u8| -> Vec<[u8; 8]> {
+        seq = seq.wrapping_add(1);
+        let b = a.to_be_bytes();
+        m.can_frame(Frame::new(0x7f2, &[seq, op, b[0], b[1], b[2], b[3], x, y]));
+        assert_eq!(m.run(100 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+        let r: Vec<[u8; 8]> = m.can().tx.iter().filter(|f| f.id == 0x7f3 && f.data[0] == seq).map(|f| { let mut d = [0u8; 8]; d.copy_from_slice(&f.data[..8]); d }).collect();
+        assert!(!r.is_empty(), "no answer to op {:02x}", op);
+        r
+    };
+    let value = |d: &[u8; 8]| u32::from_be_bytes([d[2], d[3], d[4], d[5]]);
+    // The processor's version register, as the bench 193's.
+    let r = ask(&mut m, 1, 0xff00_0030, 4, 0);
+    assert_eq!((r[0][1], value(&r[0])), (0, 0x1030_0700), "{:x?}", r);
+    // RAM written and read back, four words in one request.
+    let r = ask(&mut m, 2, 0x1234_5678, 0, 0);
+    assert_eq!(r[0][1], 0);
+    let r = ask(&mut m, 3, 0xac10_0000, 4, 0);
+    assert_eq!(r[0][1], 0, "{:x?}", r);
+    let r = ask(&mut m, 1, 0xac10_0000, 2, 2);
+    assert_eq!(r.iter().map(value).collect::<Vec<_>>(), [0x1234, 0x5678], "{:x?}", r);
+    // The flash and the battery-backed memory: refused, and unchanged.
+    let before = (m.peek8(0x0040_0000), m.board.nvram[0x100]);
+    for a in [0x0040_0000u32, 0xa040_0000, 0x1800_0100, 0xb800_0100, 0x03ff_fffe] {
+        let r = ask(&mut m, 3, a, 4, 0);
+        assert_eq!(r[0][1], 2, "a write to {:08x} was not refused: {:x?}", a, r);
+    }
+    assert_eq!((m.peek8(0x0040_0000), m.board.nvram[0x100]), before);
+    // A read that takes an address error: said so, and the monitor
+    // goes on.
+    let r = ask(&mut m, 1, 0xac10_0001, 4, 0);
+    assert_eq!((r[0][1], value(&r[0])), (1, 0x0e0), "{:x?}", r);
+    let r = ask(&mut m, 1, 0xac10_0000, 4, 0);
+    assert_eq!((r[0][1], value(&r[0])), (0, 0x1234_5678), "{:x?}", r);
+    let r = ask(&mut m, 5, 7 << 24, 0, 0);
+    assert_eq!(value(&r[0]), 1, "exceptions counted");
+    // A block and its CRC.
+    m.can().tx.clear();
+    let r = ask(&mut m, 4, 0xac10_0000, 0, 12);
+    let mut bytes = vec![0u8; 12];
+    for f in m.can().tx.iter().filter(|f| f.id == 0x7f9) {
+        let off = (f.data[0] as usize) << 16 | (f.data[1] as usize) << 8 | f.data[2] as usize;
+        for i in 0..5 {
+            if off + i < 12 {
+                bytes[off + i] = f.data[3 + i];
+            }
+        }
+    }
+    assert_eq!(&bytes[..4], &[0x12, 0x34, 0x56, 0x78]);
+    assert_eq!((r[0][1], value(&r[0])), (0, crc32(&bytes)), "{:x?}", r);
+    // The keys are followed: CD EJECT ejects.
+    m.atapi().insert(Some(vec![0u8; 64 * 2048]));
+    let ejects = m.atapi().ejects;
+    assert!(m.panel_key("CD_EJECT", true));
+    assert_eq!(m.run(500 * ms), Stop::Budget);
+    assert!(m.panel_key("CD_EJECT", false));
+    assert_eq!(m.run(3_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    assert_eq!(m.atapi().ejects, ejects + 1, "CD EJECT was not followed");
+    // Minutes of nothing asked: the watchdog is content.
+    assert_eq!(m.run(20_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    // A hang: the watchdog starts the unit again.
+    seq = seq.wrapping_add(1);
+    m.can_frame(Frame::new(0x7f2, &[seq, 7, b'H', b'A', b'N', b'G', 0, 0]));
+    let stop = m.run(10_000 * ms);
+    // (The emulator ends such a run either way: the watchdog's reset,
+    // or its own notice of a program stopped with interrupts off.)
+    let stopped = m.cpu.fault.as_deref().is_some_and(|f| f.contains("expects the watchdog"));
+    assert!(stop != Stop::Budget && (m.reset_requested || stopped), "the watchdog did not reset a hung monitor: {:?} {:?}", stop, m.cpu.fault);
+}

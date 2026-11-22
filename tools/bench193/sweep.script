@@ -1,0 +1,69 @@
+# Registers the emulator models or names, as a unit has them once the
+# loader and the monitor run (reads only; no data register of a FIFO,
+# nothing whose read is known to change it).  For bench193.py diff
+# against the emulator's run of the same.
+note core
+r32 ff000000 12         # PTEH .. PRR
+note timers
+r8 ffd80004
+r32 ffd80008 2
+r16 ffd80010
+r32 ffd80014 2
+r16 ffd8001c
+r32 ffd80020 2
+r16 ffd80028
+r8 ffd81004
+r32 ffd81008 2
+r16 ffd81010
+r8 ffd82004
+r32 ffd82008 2
+r16 ffd82010
+note interrupt controller
+r32 ff802000 1c
+r32 ff804000 24
+note ports
+r32 ff909000 2
+r32 ff93e000 4
+r32 ff93f000 4
+r32 ff940000 4
+r32 ffc40000 4
+r32 ffc44000 4
+note memory controller
+r32 fe800100
+r32 fe800220
+r32 fe800280
+note DMA channels
+r32 ff801000 8
+r32 ff801080 8
+r32 ff801100 8
+r32 ff801180 8
+r32 ff801200 8
+r32 ff801280 8
+r32 ff801300 8
+r32 ff801380 8
+r32 ff801400 4
+note sound
+r32 ff972000
+r32 ff984000 2
+note serial ports (status and control only)
+r16 ffe40000
+r16 ffe40008
+r16 ffe40010
+r16 ff926000
+r16 ff926008
+r16 ff926010
+note clock of the GPS block
+r16 ff907000 f
+note display unit
+r32 fff80000 4
+r32 fff80100 10
+r32 fff80200 10
+r32 fff80300 10
+r32 fff80600 10
+r32 fff80700 10
+r32 fff80800 10
+note CAN
+r16 ffdf0000 8
+r16 ffdf0040 2
+r16 ffdf0050 2
+r16 ffdf0058 2
