@@ -42,6 +42,13 @@ rest is unchanged.
     mailbox, which was the silent bus.
 - `src/can.c`: `canload` sends its replies up to three times and says
   again which frame is missing (a reply lost on the bus stopped a push).
+- `build.sh`: a program is linked without what it never calls of the
+  kit (`-ffunction-sections`, `-fdata-sections`, `--gc-sections`).
+  `out/<name>-<unit>.bin` is that much smaller (hello for the 192: 10
+  KiB for 31), and the 192's larger programs fit its 128 KiB again.
+- `src/hw193.c`: `sdhi_write_multi` (CMD25), for a dump to a card.
+- `examples/dump193`, `tools/dump193.py`: a window of a 193's memory
+  as its stock software left it, over CAN.
 - `examples/mon193`, `tools/bench193.py`, `tools/mon193emu.rs`,
   `tools/bench193/`: a monitor for a bench 193 driven over CAN from
   scripts, on a unit and on the emulator alike, and `diff` between the

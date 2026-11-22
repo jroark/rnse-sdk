@@ -2322,6 +2322,17 @@ fn dump193_sends_a_memory_window() {
     }
     assert!(m.insert_card(0, rnse::dev::sdhi::Card::from_bytes(card).unwrap()));
     let flash = m.board.flash.clone();
+    // The loader is a menu: once it has found the card's program (its
+    // record 0x76 with one listed), SELECT runs it.
+    for _ in 0..40 {
+        if m.can().tx.iter().any(|f| f.id == 0x7f8 && f.data[0] == 0x76 && f.data[1] >= 1) {
+            break;
+        }
+        assert_eq!(m.run(500 * ms), Stop::Budget, "{}: {:?}", name, m.cpu.fault);
+    }
+    assert!(m.panel_key("SELECT", true));
+    assert_eq!(m.run(200 * ms), Stop::Budget, "{}: {:?}", name, m.cpu.fault);
+    assert!(m.panel_key("SELECT", false));
     // Run until the program sends its closing CRC record (0xd2); it then
     // restarts the unit, which the 193 does by letting the watchdog
     // reset it (Stop::Fault, "reset requested"), so that end is fine.
