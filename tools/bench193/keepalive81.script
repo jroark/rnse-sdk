@@ -1,0 +1,74 @@
+# Does 81 [06] once a minute (the 192's keep-alive) keep a 193 from
+# starting again by itself (it did after 13.4 minutes of nothing sent,
+# 14.8 from its reset), and does the front stay lit (info 4 bit 0)?
+# (A fresh start first, so that the minutes count from one.)
+restart
+info 0
+info 1
+info 4
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+toradio 81 06
+info 4
+wait 60000
+info 1
+info 4
+info 9

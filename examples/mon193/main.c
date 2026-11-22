@@ -24,7 +24,8 @@
  *             2 SR, 3 VBR, 4 the front (bit 0 the faceplate answers,
  *             bits 8-15 the display's state, bits 16-31 its position),
  *             5 CAN frames lost, 6 in a loader's session, 7 exceptions
- *             taken so far, 8 the last one's SPC
+ *             taken so far, 8 the last one's SPC, 9 frames of its own
+ *             that did not go out (high half) and sends tried again
  *   06 RESTART  "RST!": the unit is started again
  *   07 HANG     "HANG": this program stops serving anything, as one that
  *             hangs would: the watchdog must then start the unit again
@@ -32,9 +33,13 @@
  *             length, six bytes of data) as they come
  *   09 RADIO  1 or 0: what the radio processor sends unasked on frames
  *             0x7F5 (command, length, six bytes; more of a longer one
- *             as 0x80 + offset, length, six bytes).  Nothing is sent
+ *             on 0x7F6: offset, length, six bytes).  Nothing is sent
  *             to it
  *   0a LOADER   "BACK": back to the loader (as RETURN held)
+ *   0b TORADIO  command (1), length (1, up to 4), data: a frame to the
+ *             radio processor (radio_command); the answer's first four
+ *             bytes, then radio_command's result and the answer's
+ *             command (0x20: an acknowledgement)
  *
  * A record on 0x7F8 at the start (0xb1, version, SR) and every two
  * seconds (0xb0, item: bit 0 the faceplate answers, bits 1-3 the
@@ -48,11 +53,12 @@
  * (panel_service), and a program pushed over CAN replaces it. */
 #include "rnse.h"
 
-#define VERSION 1
+#define VERSION 2
 #define REQUEST 0x7f2
 #define ANSWER 0x7f3
 #define FRONT 0x7f4
 #define RADIO 0x7f5
+#define RADIO_MORE 0x7f6
 #define BYTES 0x7f9
 #define WATCHDOG 0xffc44008
 #define BUFFER ((void *)0x8c000000)
@@ -164,10 +170,27 @@ static void feed(void)
     REG32(WATCHDOG) = (REG32(WATCHDOG) & ~1u) | strobe;
 }
 
+/* A frame out: tried three times, and counted when it did not go (a
+ * frame in thirty did not arrive from a bench unit; whether this end
+ * lost it, the count says). */
+static u32 tx_failed, tx_again;
+
+static void tx(u16 id, const u8 *d)
+{
+    int i;
+    for (i = 0; i < 3; i++) {
+        if (can_send_for(id, d, 8, 5000) == 0)
+            return;
+        tx_again++;
+        feed();
+    }
+    tx_failed++;
+}
+
 static void out(u16 id, u8 a, u8 b, u32 v, u8 x, u8 y)
 {
     u8 d[8] = { a, b, (u8)(v >> 24), (u8)(v >> 16), (u8)(v >> 8), (u8)v, x, y };
-    can_send_for(id, d, 8, 5000);
+    tx(id, d);
     feed();
 }
 
@@ -196,7 +219,7 @@ static void front_frame(int type, const u8 *data, int n)
         return;
     for (i = 0; i < 6 && i < n; i++)
         d[2 + i] = data[i];
-    can_send_for(FRONT, d, 8, 5000);
+    tx(FRONT, d);
 }
 
 static u32 front(void)
@@ -224,7 +247,7 @@ static void block(u8 seq, u32 addr, u32 len)
             for (k = 0; k < 8; k++)
                 crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1)));
         }
-        can_send_for(BYTES, d, 8, 5000);
+        tx(BYTES, d);
         feed();
         if ((off & 0x3f) < 5)
             service();
@@ -286,6 +309,7 @@ static void request(const u8 *d)
         case 6: v = (u32)loader_active(); break;
         case 7: v = mon_faults; break;
         case 8: v = mon_spc; break;
+        case 9: v = tx_failed << 16 | (tx_again & 0xffff); break;
         default:
             out(ANSWER, seq, 3, 0, d[2], 0);
             return;
@@ -317,6 +341,13 @@ static void request(const u8 *d)
         radio_on = d[2] & 1;
         out(ANSWER, seq, 0, (u32)radio_on, 0, 0);
         break;
+    case 0x0b: {
+        u8 answer[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+        n = d[3] > 4 ? 4 : d[3];
+        e = radio_command(d[2], d + 4, n, answer, sizeof answer);
+        out(ANSWER, seq, 0, be32(answer), (u8)e, (u8)radio_answered);
+        break;
+    }
     case 0x0a:
         if (a != 0x4241434bu || !loader_active()) {
             out(ANSWER, seq, 2, 0, 0, 0);
@@ -345,11 +376,12 @@ static void radio_frames(void)
     if (cmd < 0)
         return;
     for (i = 0; i == 0 || i < n; i += 6) {
-        d[0] = i ? (u8)(0x80 + i) : (u8)cmd;
+        d[0] = i ? (u8)i : (u8)cmd;
         d[1] = (u8)n;
         for (k = 0; k < 6; k++)
             d[2 + k] = i + k < n ? data[i + k] : 0;
-        can_send_for(RADIO, d, 8, 5000);
+        tx(i ? RADIO_MORE : RADIO, d);
+        feed();
     }
 }
 

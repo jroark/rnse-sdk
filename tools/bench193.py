@@ -37,6 +37,8 @@ The script, a line each ('#' starts a comment; numbers in hex):
     radio on|off                the radio processor's unasked frames too
     wait MS                     (decimal)
     restart | hang | loader     and wait for the monitor to be back
+    toradio CMD [HEX]           a frame to the radio processor (up to four
+                                bytes of data) and its answer
     send ID HEX                 a frame of our own onto the bus
     note TEXT                   into OUT as it is
 
@@ -165,7 +167,7 @@ class Bench:
             self.lost_bus(e)
             return []
         for fid, d in frames:
-            self.log.frame('rx', fid, d, quiet=fid not in (0x7f3, 0x7f4, 0x7f5, 0x7f8))
+            self.log.frame('rx', fid, d, quiet=fid not in (0x7f3, 0x7f4, 0x7f5, 0x7f6, 0x7f8))
             if fid == 0x7f8 and len(d) == 8:
                 if d[0] == 0x70:
                     self.alive = False
@@ -446,6 +448,11 @@ def run(argv):
                             raise SystemExit(1)
                     say('%s = back' % cmd)
                     b.log.note('%s: back after %.1f s' % (cmd.upper(), time.time() - t))
+                elif cmd == 'toradio':
+                    data = bytes.fromhex(''.join(w[2:]))
+                    st, value, r, got = b.ask(11, bytes([number(w[1]), len(data)]) + data.ljust(4, b'\0'), timeout=4.0, tries=1)[0]
+                    r = r - 256 if r > 127 else r
+                    say('%s = %s' % (line, 'no answer (%d)' % r if r < 0 else 'answer %02x [%s]' % (got, value.to_bytes(4, 'big')[:r].hex(' '))))
                 elif cmd == 'send':
                     b.send(number(w[1]), bytes.fromhex(''.join(w[2:])))
                     say(line)
