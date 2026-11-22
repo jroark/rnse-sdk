@@ -29,6 +29,9 @@ needed (tools/canbench.py's CANable code is used).
 The script, a line each ('#' starts a comment; numbers in hex):
 
     r8|r16|r32 ADDR [COUNT]     read COUNT values from ADDR on
+    scan FIRST LAST STEP [BITS] one read (32 bits, or 8 or 16) at every STEP
+                                from FIRST to LAST: which pages answer.
+                                A row of the same fault is one line
     w8|w16|w32 ADDR VALUE       write (the monitor refuses the flash and
                                 the battery-backed memory)
     block ADDR LEN [FILE]       LEN bytes; saved as FILE beside OUT
@@ -401,6 +404,37 @@ def run(argv):
                         if got[-1][0] != 0 or len(got) < n:
                             break
                         done += n
+                elif cmd == 'scan':
+                    # One read at each step, each asked for alone: a
+                    # read that takes the unit down costs that address
+                    # and no other.
+                    first, last, step = number(w[1]), number(w[2]), number(w[3])
+                    size = int(w[4]) // 8 if len(w) > 4 else 4
+                    faults = None
+                    for at in range(first, last + 1, step):
+                        try:
+                            if not b.alive:
+                                b.wait_monitor()
+                            st, value, _, _ = b.ask(1, at.to_bytes(4, 'big') + bytes([size, 1]))[0]
+                            text = ('%0*x' % (2 * size, value)) if st == 0 else status_text(st, value)
+                        except Gone:
+                            text = 'LOST'
+                        # Rows of the same fault are said once, with
+                        # their end, to keep a map of 8192 pages short.
+                        if text.startswith('FAULT'):
+                            if faults and faults[2] == text:
+                                faults[1] = at
+                                continue
+                            if faults:
+                                say('scan %08x-%08x = %s' % tuple(faults))
+                            faults = [at, at, text]
+                            continue
+                        if faults:
+                            say('scan %08x-%08x = %s' % tuple(faults))
+                            faults = None
+                        say('r%d %08x = %s' % (size * 8, at, text))
+                    if faults:
+                        say('scan %08x-%08x = %s' % tuple(faults))
                 elif cmd in ('w8', 'w16', 'w32'):
                     size = int(cmd[1:]) // 8
                     addr, value = number(w[1]), number(w[2])

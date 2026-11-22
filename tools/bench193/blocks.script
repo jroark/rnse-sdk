@@ -1,0 +1,39 @@
+# Which 4 KiB pages of the system-on-chip's register space answer: one
+# 32-bit read at the base of every page from 0xfe000000 up (reads only;
+# offset 0 is a mode or control register in every block known so far,
+# never a FIFO's data).  A page that answers and that the stock software
+# never touches is a block it leaves unused.  For bench193.py diff
+# against the emulator's run of the same.
+#
+# On a unit: some 8200 requests, a quarter of an hour.  A read that
+# hangs the unit costs a watchdog restart (95 s) and shows as LOST.
+note the lower half of the P4 area, one page in sixteen
+scan fc000000 fdff0000 10000
+note 0xfe000000-0xfeffffff
+scan fe000000 fefff000 1000
+note 0xff000000-0xff7fffff
+scan ff000000 ff7ff000 1000
+note 0xff800000-0xff9fffff
+scan ff800000 ff9ff000 1000
+note 0xffa00000-0xffbfffff
+scan ffa00000 ffbff000 1000
+note 0xffc00000-0xffdfffff
+scan ffc00000 ffdff000 1000
+note 0xffe00000-0xffffffff
+scan ffe00000 ffeff000 1000
+scan fff00000 ffffe000 1000
+info 7
+# Where relatives of this chip have their USB host (Linux: the SH7786's
+# EHCI at 0xffe70000 and OHCI at 0xffe70400; the R-Car H1's second pair
+# is taken to be at 0xfff70000).  An EHCI block begins with its length
+# and version (0x01000010 as the bus gives it), an OHCI block with its
+# revision (0x10).  Capability registers: reading them changes nothing.
+note USB host candidates
+r32 ffe70000 4
+r32 ffe70400 2
+r32 ffe70800 4
+r32 fff70000 4
+r32 fff70400 2
+note clock and module stop registers (R-Car layout at 0xffc80000)
+r32 ffc80000 14
+info 7
