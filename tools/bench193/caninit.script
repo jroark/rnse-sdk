@@ -2,7 +2,6 @@
 # from reset in four variants (mon193's can_try), the likeliest to
 # work first.  One that works answers, and the next request shows that
 # frames come in too; one that does not costs a restart (LOST).
-push
 info 0
 caninit 3
 info 1

@@ -2374,6 +2374,16 @@ fn mon193_answers_guards_and_recovers() {
     }
     assert_eq!(&bytes[..4], &[0x12, 0x34, 0x56, 0x78]);
     assert_eq!((r[0][1], value(&r[0])), (0, crc32(&bytes)), "{:x?}", r);
+    // The CAN controller set up from reset with its top control bit
+    // kept: the answer comes, the next request is heard, and the unit
+    // is not started again; five seconds later it is still there.
+    let r = ask(&mut m, 13, 3 << 24, 0, 0);
+    assert_eq!((r[0][1], r[0][6]), (0, 3), "{:x?}", r);
+    let r = ask(&mut m, 5, 0, 0, 0);
+    assert_eq!(value(&r[0]) >> 8, 0x4d4f4e, "{:x?}", r);
+    assert_eq!(m.run(6_000 * ms), Stop::Budget, "{:?}", m.cpu.fault);
+    let r = ask(&mut m, 5, 0, 0, 0);
+    assert_eq!(value(&r[0]) >> 8, 0x4d4f4e, "{:x?}", r);
     // The keys are followed: CD EJECT ejects.
     m.atapi().insert(Some(vec![0u8; 64 * 2048]));
     let ejects = m.atapi().ejects;

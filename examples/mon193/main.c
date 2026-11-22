@@ -61,7 +61,7 @@
  * (panel_service), and a program pushed over CAN replaces it. */
 #include "rnse.h"
 
-#define VERSION 5
+#define VERSION 6
 #define REQUEST 0x7f2
 #define ANSWER 0x7f3
 #define FRONT 0x7f4
@@ -275,7 +275,7 @@ static void block(u8 seq, u32 addr, u32 len)
 #define CAN 0xffdf0000
 #define CAN_MB(n) (CAN + 0x100 + 0x20 * (n))
 
-static u32 on_trial;
+static u32 on_trial, trial_from;
 
 static void can_try(u8 seq, int variant)
 {
@@ -322,7 +322,8 @@ static void can_try(u8 seq, int variant)
      * its frames under other identifiers, heard none of ours, and had to
      * be switched off.  So a request has to come in within five seconds
      * of this, or the unit is started again. */
-    on_trial = millis() | 1;
+    on_trial = 1;
+    trial_from = millis();
 }
 
 static void request(const u8 *d)
@@ -508,7 +509,7 @@ int main(void)
                 canload_frame(id, d, len);
             feed();
         }
-        if (on_trial && millis() - on_trial >= 5000)
+        if (on_trial && millis() - trial_from >= 5000)
             restart();
         if (radio_on)
             radio_frames();
