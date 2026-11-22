@@ -39,6 +39,8 @@
  *   0c KEEPALIVE  1 or 0: the radio processor's keep-alive sent or not
  *             (it is, from the start: without it the unit starts again
  *             after some thirteen minutes)
+ *   0f STARVE  milliseconds (4): the watchdog not served for that long,
+ *             then the answer; none when the watchdog bit first
  *   0e DRIVE  sector (4), count (1, up to 4), what (1): 0 the sectors
  *             read by cd_read into a buffer of the monitor's: four
  *             answers, cd_read's result, the CRC-32 of the buffer, the
@@ -67,7 +69,7 @@
  * (panel_service), and a program pushed over CAN replaces it. */
 #include "rnse.h"
 
-#define VERSION 8
+#define VERSION 9
 #define REQUEST 0x7f2
 #define ANSWER 0x7f3
 #define FRONT 0x7f4
@@ -418,6 +420,19 @@ static void request(const u8 *d)
         radio_on = d[2] & 1;
         out(ANSWER, seq, 0, (u32)radio_on, 0, 0);
         break;
+    case 0x0f: {
+        /* The watchdog left unserved for so many milliseconds, by the
+         * timer's count and not the tick's (interrupts stay as they
+         * are); then served again and the answer sent: it comes when
+         * the watchdog allows that long, and the unit starts again
+         * when it does not. */
+        u32 t = micros();
+        while (micros() - t < a * 1000)
+            ;
+        feed();
+        out(ANSWER, seq, 0, a, 0, 0);
+        break;
+    }
     case 0x0e: {
         /* The drive, by the kit's driver. */
         static u8 sectors[4 * 2048] __attribute__((aligned(32)));

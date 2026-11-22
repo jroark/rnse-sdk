@@ -28,6 +28,7 @@ suite 192 193
 swap 192 193
 timing 192 193
 tuner 192 193
+dump193 193
 first193 193
 probe193 193
 sdload193 193

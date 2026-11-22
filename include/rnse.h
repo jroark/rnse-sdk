@@ -251,6 +251,13 @@ int sdhi_start(int slot);
 int sdhi_read(u32 sector, void *buf);
 /* count sectors with one CMD18 (the host sends CMD12 by itself). */
 int sdhi_read_multi(u32 sector, u32 count, void *buf);
+/* count sectors written from sector on with one CMD25, then the card
+ * waited for until it has programmed them (CMD13).  0; -1 no card
+ * started; -2 the card refused the command; -(0x100 + n) block n was not
+ * taken; -4 the transfer did not end; -5 the card stayed busy.  The
+ * write-protect switch is not looked at (bit 7 of 0xff90a01c, set when
+ * it is off, if the slot has it wired).  Not yet tried on a unit. */
+int sdhi_write_multi(u32 sector, u32 count, const void *buf);
 /* The clock divider after the start (0, the default, the stock
  * software's and the fastest; 1 half that); for the next sdhi_start. */
 extern u16 sdhi_fast_clock;

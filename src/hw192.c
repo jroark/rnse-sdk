@@ -528,4 +528,5 @@ void (*sdhi_trace)(int cmd, u32 arg, u32 response, int result);
 int sdhi_start(int slot) { (void)slot; return -1; }
 int sdhi_read(u32 sector, void *buf) { (void)sector; (void)buf; return -1; }
 int sdhi_read_multi(u32 sector, u32 count, void *buf) { (void)sector; (void)count; (void)buf; return -1; }
+int sdhi_write_multi(u32 sector, u32 count, const void *buf) { (void)sector; (void)count; (void)buf; return -1; }
 u16 sdhi_fast_clock;
