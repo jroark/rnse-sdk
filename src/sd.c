@@ -11,12 +11,21 @@
  * here are those of the stock driver as the emulator shows them
  * (`rnse boot --sd-card ... --trace-dsp`).
  *
- * So this works with one installed software and no other: the North
- * American V222 0371, whose program sits at 0x00200000 in the flash.
- * The table below says how the stock driver's download is put together
- * from the flash (tools/dsp-recipe.py makes it from a trace and checks
- * that it rebuilds every word); sd_init looks for the program's
- * header first and gives up on a unit that has other software.
+ * So this knows one program and no other: the one of the North
+ * American V222 0371 (and 0367), at 0x00200000 in the flash, which the
+ * European V220 0815 of the last update disc has too, at 0x00230000.  The
+ * table below says how the stock driver's download is put together
+ * from there (tools/dsp-recipe.py makes it from a trace and checks
+ * that it rebuilds every word).  A unit with other software has
+ * another program in that place, or the same one elsewhere; sd_init
+ * then takes the words from the disc in the drive instead, when that
+ * is a program disc with such an operating system on it (the loader's
+ * own disc, made from one of those update discs:
+ * tools/build-universal-loader.sh).
+ * The flash's place of a word is then a place in the operating
+ * system's module in LOADING.KWI.  sd_attach and sd_restart, which
+ * talk to the program the installed software left running, are for
+ * that one software only and say -2 on any other.
  *
  * Reading only.  Standard and high-capacity cards; FAT12, FAT16 and
  * FAT32. */
@@ -30,31 +39,31 @@ enum { FROM_FLASH, ZEROES, LITERAL, ANSWER };
 static const u16 literal[] = { 0x0001, 0x0e00, 0x0c00, 0x0002, 0x1c6f, 0x8000, 0x00f6, 0x9f00, 0x0004, 0x0002, 0x0bfb, 0x0000, 0x0000, 0x026c, 0x2994, 0x0467, 0x4900, 0x0001, 0x4ef2, 0x0001, 0x0002, 0x061d, 0x29e3, 0x0f4f, 0x4000 };
 static const struct step { u8 kind; u32 at; u16 count; } recipe[] = {
     { LITERAL, 0x000000, 3 },
-    { FROM_FLASH, 0x20000c, 7168 },
+    { FROM_FLASH, 0x00000c, 7168 },
     { ANSWER, 0x000000, 0 },
     { LITERAL, 0x000003, 3 },
-    { FROM_FLASH, 0x203818, 14558 },
+    { FROM_FLASH, 0x003818, 14558 },
     { ANSWER, 0x000000, 0 },
     { LITERAL, 0x000006, 2 },
-    { FROM_FLASH, 0x20a9dc, 492 },
+    { FROM_FLASH, 0x00a9dc, 492 },
     { ANSWER, 0x000000, 0 },
     { LITERAL, 0x000008, 5 },
     { ANSWER, 0x000000, 0 },
     { LITERAL, 0x00000d, 2 },
-    { FROM_FLASH, 0x20adcc, 620 },
+    { FROM_FLASH, 0x00adcc, 620 },
     { ANSWER, 0x000000, 0 },
     { LITERAL, 0x00000f, 2 },
-    { FROM_FLASH, 0x20b2ac, 1127 },
+    { FROM_FLASH, 0x00b2ac, 1127 },
     { ANSWER, 0x000000, 0 },
     { LITERAL, 0x000011, 3 },
     { ANSWER, 0x000000, 0 },
     { LITERAL, 0x000014, 3 },
     { ZEROES, 0x000000, 58 },
-    { FROM_FLASH, 0x20bc04, 1507 },
+    { FROM_FLASH, 0x00bc04, 1507 },
     { ANSWER, 0x000000, 0 },
     { LITERAL, 0x000017, 2 },
     { ZEROES, 0x000000, 31 },
-    { FROM_FLASH, 0x20c810, 3888 },
+    { FROM_FLASH, 0x00c810, 3888 },
     { ANSWER, 0x000000, 0 },
 };
 
@@ -266,6 +275,107 @@ static u16 flash_word(u32 at)
     return (u16)(p[0] | p[1] << 8);
 }
 
+/* The words from a disc: disc_at is where on the disc, in bytes, the
+ * flash's address 0 would be, were the operating system's module laid
+ * out there as in the flash; one sector is kept. */
+static int from_disc, disc_failed;
+static u32 disc_at, disc_have;
+static u8 disc_sector[2048];
+
+static u8 disc_byte(u32 at)
+{
+    u32 pos = disc_at + at, sector = pos >> 11;
+    if (sector != disc_have) {
+        if (disc_failed || cd_read(sector, 1, disc_sector)) {
+            disc_failed = 1;
+            return 0;
+        }
+        disc_have = sector;
+    }
+    return disc_sector[pos & 2047];
+}
+
+/* Where in the flash the program starts: 0x200000 in the North American
+ * software 0371 and 0367, 0x230000 in the European 0815 of the update
+ * disc with the indexes 0310 and 0740, which has the same program. */
+static u32 program_at;
+
+static u16 program_word(u32 at)
+{
+    at += program_at;
+    if (!from_disc)
+        return flash_word(at);
+    return (u16)(disc_byte(at) | disc_byte(at + 1) << 8);
+}
+
+/* The program this driver knows how to send, where the words now come
+ * from: its first two parts' numbers and lengths, looked for at every
+ * 64 KiB of the operating system's second and third megabyte. */
+static int program_there(void)
+{
+    for (program_at = 0x100000; program_at < 0x300000; program_at += 0x10000)
+        if (program_word(0) == 1 && program_word(4) == 0x3800 && program_word(0x380c) == 2 && program_word(0x3810) == 0x71bc)
+            return 1;
+    return 0;
+}
+
+static u32 be32(const u8 *p)
+{
+    return (u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | p[3];
+}
+
+/* Looks for the table's operating system on the disc in the drive:
+ * LOADING.KWI has, for each kind of unit, a block of 0x100 bytes behind
+ * 0x14 + 0x40 for each (docs/firmware-format.md): the modules' names,
+ * places and sizes from +0x48, sixteen bytes each, the place in units of
+ * two bytes from the sector at +0xf8.  0 when the program is there. */
+static int program_on_disc(void)
+{
+    u32 kwi, size, n, i, j, k;
+    u8 head[0x80];
+    from_disc = 0;
+    if (cd_wait_ready(8000) || cd_find("LOADING.KWI", &kwi, &size))
+        return -1;
+    disc_failed = 0;
+    disc_have = 0xffffffff;
+    from_disc = 1;
+    disc_at = kwi << 11; /* disc_byte(x): byte x of the file, for now */
+    program_at = 0;
+    n = disc_byte(0x11);
+    if (n == 0 || n > 8)
+        n = 0;
+    for (i = 0; i < n; i++) {
+        u32 block = 0x14 + n * 0x40 + i * 0x100, count, start = 0;
+        count = (u32)disc_byte(block + 0x44) << 8 | disc_byte(block + 0x45);
+        if (count > 11)
+            count = 11;
+        for (k = 0; k < 5; k++)
+            start = start << 8 | disc_byte(block + 0xf8 + k);
+        for (j = 0; j < count; j++) {
+            u32 e = block + 0x48 + j * 16, module;
+            u8 rec[12];
+            for (k = 0; k < 12; k++)
+                rec[k] = disc_byte(e + k);
+            if (rec[0] != 'O' || rec[1] != 'S' || rec[2] != 'M' || rec[3])
+                continue;
+            module = (start << 11) + be32(rec + 8) * 2;
+            for (k = 0; k < 0x80; k++)
+                head[k] = disc_byte(module + k);
+            /* A 192's operating system: its header says where in the
+             * flash it goes, 0xc100. */
+            if (disc_failed || head[6] != 'V' || head[7] != '2' || head[8] != '2' || (be32(head + 0x70) & 0x1fffffff) != 0xc100)
+                continue;
+            disc_at = (kwi << 11) + module - 0xc100;
+            if (program_there() && !disc_failed)
+                return 0;
+            disc_failed = 0;
+            disc_at = kwi << 11;
+        }
+    }
+    from_disc = 0;
+    return -1;
+}
+
 /* The installed software's program into the processor, as its driver
  * sends it. */
 static int download(void)
@@ -280,7 +390,9 @@ static int download(void)
             continue;
         }
         for (k = 0; k < s->count; k++) {
-            w = s->kind == FROM_FLASH ? flash_word(s->at + 2 * k) : s->kind == LITERAL ? literal[s->at + k] : 0;
+            w = s->kind == FROM_FLASH ? program_word(s->at + 2 * k) : s->kind == LITERAL ? literal[s->at + k] : 0;
+            if (disc_failed)
+                return -1;
             if (put(w))
                 return -1;
         }
@@ -350,8 +462,10 @@ static int init(int which)
 
     if (screen_width != 400)
         return sdhi_start(which); /* the 193's own interface: hw193.c */
-    /* The program this driver knows how to send, where it knows it. */
-    if (flash_word(0x200000) != 1 || flash_word(0x200004) != 0x3800 || flash_word(0x20380c) != 2 || flash_word(0x203810) != 0x71bc)
+    /* The program this driver knows how to send: in the flash of a
+     * unit with that software, and for any other on the disc. */
+    from_disc = 0;
+    if (!program_there() && program_on_disc())
         return -2;
     slot = which & 1;
     inbox_in = inbox_out = 0;
@@ -610,7 +724,8 @@ static int attach(int which)
     u32 first;
     if (screen_width != 400)
         return -1;
-    if (flash_word(0x200000) != 1 || flash_word(0x200004) != 0x3800 || flash_word(0x20380c) != 2 || flash_word(0x203810) != 0x71bc)
+    from_disc = 0;
+    if (!program_there())
         return -2;
     if (!running(which))
         return -14;
@@ -660,7 +775,8 @@ static int start_again(int which)
 {
     if (screen_width != 400)
         return -1;
-    if (flash_word(0x200000) != 1 || flash_word(0x200004) != 0x3800 || flash_word(0x20380c) != 2 || flash_word(0x203810) != 0x71bc)
+    from_disc = 0;
+    if (!program_there())
         return -2;
     if (!running(which))
         return -14;

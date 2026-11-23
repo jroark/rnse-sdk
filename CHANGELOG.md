@@ -5,6 +5,15 @@ other repositories depend on"); releases are tagged.
 
 ## Not yet released
 
+- New `tools/build-universal-loader.sh`: one loader disc from a stock
+  update disc, for every variant on it and any software such a unit has
+  (index 0990; `docs/sd-loader.md`, "One disc for any unit").
+- `src/sd.c` (192): `sd_init` finds the card processors' program by its
+  header instead of at one address (the European 0815 of the last update
+  discs has it at 0x230000), and reads it from the operating system on
+  the disc in the drive when the unit's flash has another.  `sd_attach`
+  and `sd_restart` still answer -2 on other software; `examples/sdboot`
+  now goes on to `sd_init` then.
 - New `can_tell` (`include/rnse.h`, `src/hw193.c`; the 193): a frame
   through mailbox 1 of the controller as the software before left it,
   usable before `board_init`, with the watchdog fed while it waits and
@@ -13,8 +22,8 @@ other repositories depend on"); releases are tagged.
   `eject193`, `panel193`, `slot193`, `speed193`, `sdcheck193`) each had
   a copy that held the watchdog for 112 ms a record on a bus with no
   other node, and a unit alone on a bench was reset while they started
-  (`docs/custom-firmware.md`, "A 193 alone on its bus").  Not yet tried
-  on a unit.
+  (`docs/custom-firmware.md`, "A 193 alone on its bus").  `sdload193` with it
+  has started on a bench unit with nothing else on the bus.
 - `build.sh`: an example with a file `bare` links none of the kit's
   code but the files of `src/` that file names, with the example's own
   start-up code (`*.S`) and `link.ld`. Nothing changes for an example
