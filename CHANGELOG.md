@@ -5,6 +5,16 @@ other repositories depend on"); releases are tagged.
 
 ## Not yet released
 
+- New `can_tell` (`include/rnse.h`, `src/hw193.c`; the 193): a frame
+  through mailbox 1 of the controller as the software before left it,
+  usable before `board_init`, with the watchdog fed while it waits and
+  a short wait once nobody acknowledges.  The 193 bench programs
+  (`probe193`, `first193`, `sdload193`, `dump193`, `du193`, `keys193`,
+  `eject193`, `panel193`, `slot193`, `speed193`, `sdcheck193`) each had
+  a copy that held the watchdog for 112 ms a record on a bus with no
+  other node, and a unit alone on a bench was reset while they started
+  (`docs/custom-firmware.md`, "A 193 alone on its bus").  Not yet tried
+  on a unit.
 - `build.sh`: an example with a file `bare` links none of the kit's
   code but the files of `src/` that file names, with the example's own
   start-up code (`*.S`) and `link.ld`. Nothing changes for an example
