@@ -13,8 +13,8 @@ other repositories depend on"); releases are tagged.
   `eject193`, `panel193`, `slot193`, `speed193`, `sdcheck193`) each had
   a copy that held the watchdog for 112 ms a record on a bus with no
   other node, and a unit alone on a bench was reset while they started
-  (`docs/custom-firmware.md`, "A 193 alone on its bus").  Not yet tried
-  on a unit.
+  (`docs/custom-firmware.md`, "A 193 alone on its bus").  `sdload193` with it
+  has started on a bench unit with nothing else on the bus.
 - `build.sh`: an example with a file `bare` links none of the kit's
   code but the files of `src/` that file names, with the example's own
   start-up code (`*.S`) and `link.ld`. Nothing changes for an example

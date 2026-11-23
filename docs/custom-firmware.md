@@ -1091,13 +1091,18 @@ it as over one with somebody.  `can_tell` (`src/hw193.c`) is that
 function once, for all of them: the strobe is fed within its waits
 (the caller passes what feeds it), the cancel gets the time of two
 frames, and after one frame that nobody took the next ones wait some
-20 ms and no longer, until one is acknowledged again.  By the unit's
-loop times a start that took eighteen records and two seconds alone
-should take about half a second, with the strobe fed all the way.
+20 ms and no longer, until one is acknowledged again.  A start
+that took eighteen records and two seconds alone and then failed
+takes one second, with the strobe fed all the way.
 
-The programs build and the emulator's tests pass with it.  It has not
-yet run on a unit: the proof is a disc with the new loader that starts
-with no adapter on the bus.
+On the bench unit, alone on its bus, the loader with it started the
+first time it was tried (`sdload193`, started by the stock software
+1054, the logic analyser on the wires again): the first record held
+the bus for 63 ms and each of the nineteen after it for 23 ms with
+25 ms to the next, step 10 was passed a second after the hand-over,
+the screen came up, and the loader went round its cards every four
+seconds with no reset in the ten seconds recorded.  The other ten
+programs have only been built and run in the emulator.
 
 The emulator did not catch this and still would not: the same loader
 under `--strict --can-alone` has a longest pause on the strobe of
