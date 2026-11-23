@@ -73,3 +73,24 @@ or more apart, and sixteen frames sent back to back by the unit all got
 out; of forty frames sent back to back to it, eight were lost, the
 32-frame receive ring filling while the program's own answer waited
 for the bus.
+
+## Stock V575 diagnostic disc eject
+
+On the North American 193, adaptation channel 67 (0x43), value 1, is
+the one-shot CD/DVD eject documented by Ross-Tech. The V575 software
+in 193-575-fw.iso has a K-line diagnostic task and an adaptation reply
+routine labeled `adp_kln_ans`. The channel 0x43 code loads 0x43 at
+0x806777de and calls the reply routine at 0x806753da via the literal
+loaded at 0x80677806. That routine references its K-line error message
+at 0x806754ae. The eject code's literal pool at 0x806778b0 points to
+the `adp_eject` diagnostic. Addresses are SH-4 addresses in the mapped
+flash image.
+
+On the 193 bench with ignition status present, CANable sent TP2.0
+channel setup on 0x200 for Navigation (0x37) and Radio (0x56), requesting
+tester receive ID 0x300. Neither elicited a reply. The unit continued
+sending 0x363, 0x365, 0x436, 0x604 and 0x661. Running the stock V575
+image in the emulator likewise delivered those requests to receive
+mailbox 31 without a setup reply. This supports a K-line route for the
+documented adaptation. A stock eject command over infotainment CAN
+remains unverified.
