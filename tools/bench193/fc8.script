@@ -1,0 +1,19 @@
+# The block that bit 0 of 0xffc80034 wakes, 0xfc800000: the whole page
+# at 32 bits, its start at 16 and 8, and the same with the bit set.
+w32 ffc80034 0
+note 32 bits, the page
+r32 fc800000 400
+note 16 bits
+r16 fc800000 10
+r16 fc800100 10
+note 8 bits
+r8 fc800000 10
+r8 fc800100 10
+note the megabytes after it, every 256 bytes of the first 64 KiB
+scan fc800000 fc80ff00 100
+note stopped again
+w32 ffc80034 1
+r32 fc800000 2
+r32 fc800100 2
+w32 ffc80034 0
+info 7

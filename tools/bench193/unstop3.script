@@ -1,0 +1,12 @@
+# The block that bit 0 of the clock block's +0x34 wakes, 0xfc800000:
+# its first kilobyte and the starts of its next ones, with the two
+# always-on neighbours for comparison.  Reads only (the bit is clear
+# since unstop.script; cleared again here in case of a restart since).
+w32 ffc80034 0
+r32 fc800000 100
+r32 fc800400 40
+r32 fc800800 40
+r32 fc800c00 40
+r32 fc400040 30
+r32 fc600040 30
+info 7
