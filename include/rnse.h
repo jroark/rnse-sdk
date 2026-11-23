@@ -454,6 +454,17 @@ int can_send(u16 id, const u8 *data, int len);
  * and is on it at least once after 3 ms, acknowledged or not: that is
  * how to send to a logic analyser, which acknowledges nothing. */
 int can_send_for(u16 id, const u8 *data, int len, u32 us);
+
+/* The 193: a frame through mailbox 1 of the controller as the software
+ * before left it, for a program that reports before board_init (no
+ * timer, no interrupt, nothing of the kit set up).  0 when it was
+ * acknowledged, -1 when not, and then it is taken back.  `feed`, if
+ * given, is called every millisecond or so while this waits: a program
+ * that strobes the watchdog itself passes what does it, or a unit alone
+ * on its bus is reset while a frame waits for an acknowledgement.
+ * After a frame nobody took the next ones wait some 20 ms at most,
+ * until one is taken again.  Not on the 192. */
+int can_tell(u16 id, const u8 *data, int len, void (*feed)(void));
 /* The length of the oldest frame waiting (0..8), its identifier and
  * data stored; -1 when there is none. */
 int can_receive(u16 *id, u8 *data);

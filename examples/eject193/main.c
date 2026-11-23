@@ -17,25 +17,7 @@
 static void say(u8 test, u8 item, u32 value, u32 second)
 {
     u8 d[8] = { test, item, (u8)(value >> 24), (u8)(value >> 16), (u8)(value >> 8), (u8)value, (u8)(second >> 8), (u8)second };
-    u32 n;
-    int i;
-    REG16(CAN_MB1 + 0x00) = (u16)(0x7f8 << 2);
-    for (i = 0; i < 8; i++)
-        REG8(CAN_MB1 + 0x08 + i) = d[i];
-    REG16(CAN_MB1 + 0x10) = 8;
-    REG32(CAN + 0x20) = 0x00000002;
-    for (n = 0; n < 400000; n++)
-        if (REG16(CAN + 0x32) & 0x0002)
-            break;
-    if (REG16(CAN + 0x32) & 0x0002) {
-        REG16(CAN + 0x32) = 0x0002;
-        return;
-    }
-    REG32(CAN + 0x28) = 0x00000002;
-    for (n = 0; n < 400000; n++)
-        if (!(REG16(CAN + 0x22) & 0x0002) || (REG16(CAN + 0x3a) & 0x0002))
-            break;
-    REG16(CAN + 0x3a) = 0x0002;
+    can_tell(0x7f8, d, 8, 0);
 }
 
 /* The drive's status with a counted wait for the bits to clear. */

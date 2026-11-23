@@ -171,26 +171,8 @@ static void pace(void)
 }
 static void frame(u16 id, const u8 *d, int len)
 {
-    u32 n;
-    int i;
-    REG16(CAN_MB1 + 0x00) = (u16)(id << 2);
-    for (i = 0; i < len; i++)
-        REG8(CAN_MB1 + 0x08 + i) = d[i];
-    REG16(CAN_MB1 + 0x10) = (u16)(len & 15);
-    REG32(CAN + 0x20) = 0x00000002;
-    for (n = 0; n < 400000; n++)
-        if (REG16(CAN + 0x32) & 0x0002)
-            break;
-    if (REG16(CAN + 0x32) & 0x0002) {
-        REG16(CAN + 0x32) = 0x0002;
+    if (can_tell(id, d, len, 0) == 0)
         pace();
-        return;
-    }
-    REG32(CAN + 0x28) = 0x00000002;
-    for (n = 0; n < 400000; n++)
-        if (!(REG16(CAN + 0x22) & 0x0002) || (REG16(CAN + 0x3a) & 0x0002))
-            break;
-    REG16(CAN + 0x3a) = 0x0002;
 }
 
 static void rec(u8 test, u8 item, u32 value, u32 second)

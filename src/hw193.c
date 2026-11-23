@@ -468,6 +468,45 @@ int can_send(u16 id, const u8 *data, int len)
     return can_send_for(id, data, len, 100000);
 }
 
+/* See rnse.h.  The waits are counted, since no timer may be running
+ * yet.  What a bench unit showed (2026-11-22, a logic analyser on the
+ * bus, nothing acknowledging): 400000 rounds of the first loop are 55 ms
+ * of the frame sent over and over, and the copies of this the programs
+ * had waited as long again for the cancel, 112 ms a frame with the
+ * watchdog left alone.  That is the watchdog's limit, and the unit was
+ * reset in the first frame or in the eighteenth.  So the strobe is fed
+ * within the waits, a cancel gets the time of two frames, and once a
+ * frame has gone unacknowledged the next ones wait 150000 rounds, some
+ * 20 ms, until one is taken.  (Not fewer: the emulator runs a round in
+ * a seventh of the time, and a frame takes its 1.2 ms on its bus too.) */
+static int tell_unheard;
+
+int can_tell(u16 id, const u8 *data, int len, void (*feed)(void))
+{
+    u32 n, rounds = tell_unheard ? 150000 : 400000;
+    int i;
+    REG16(CAN_MB(1) + 0x00) = (u16)(id << 2);
+    for (i = 0; i < len && i < 8; i++)
+        REG8(CAN_MB(1) + 0x08 + i) = data[i];
+    REG16(CAN_MB(1) + 0x10) = (u16)(len & 15);
+    REG32(CAN + 0x20) = 0x00000002; /* transmit request, mailbox 1 */
+    for (n = 0; n < rounds && !(REG16(CAN + 0x32) & 0x0002); n++)
+        if (feed && !(n & 0x1fff))
+            feed();
+    if (REG16(CAN + 0x32) & 0x0002) {
+        REG16(CAN + 0x32) = 0x0002; /* acknowledged: flag taken back */
+        tell_unheard = 0;
+        return 0;
+    }
+    REG32(CAN + 0x28) = 0x00000002; /* cancel */
+    for (n = 0; n < 20000 && (REG16(CAN + 0x22) & 0x0002) && !(REG16(CAN + 0x3a) & 0x0002); n++)
+        if (feed && !(n & 0x1fff))
+            feed();
+    REG16(CAN + 0x3a) = 0x0002;
+    tell_unheard = 1;
+    return -1;
+}
+
 int can_take(u16 *id, u8 *data)
 {
     int len, i;

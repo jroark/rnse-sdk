@@ -6,8 +6,8 @@ small hardware layer for each generation of the unit, and an example.
 
 Read the sections "On a real unit" and "What this does and does not
 establish" before taking a disc to a car.  The 192's side has run on
-one real unit, a North American one on a bench; the 193's has not run
-on any.
+one real unit, a North American one on a bench; the 193's on bench
+units, with what is said under "A 193 alone on its bus".
 
 ## Where the program runs, and what starts it
 
@@ -1051,6 +1051,60 @@ Things that were wrong in what had been assumed, besides the latch:
     private as the unit's owner: destinations, the car's number.
 
 Not tried on the unit: receiving on CAN.
+
+### A 193 alone on its bus
+
+The programs written for the bench 193 (`examples/probe193`,
+`first193`, `sdload193` and the others of that family) report on CAN
+from their first instruction, before `board_init`, through the
+controller as the stock software left it.  The same discs
+started on a bench unit or did not, and the difference was whether a
+CAN adapter was plugged into the bus: with it the loader came up, and
+without it the screen stayed dark for a moment after the stock software
+had handed over and the unit started again, round after round.  A
+stock update disc on the same bench, alone, updated the unit and ran
+for five minutes.
+
+A logic analyser on the two wires (which acknowledges nothing, where
+the adapter acknowledges even when told to listen) showed why:
+
+* Each program had its own copy of one function: put the record in
+  mailbox 1, ask for it to be sent, wait 400000 rounds of a loop for
+  the acknowledgement, and when there is none cancel the frame and wait
+  as long again.  It strobed the watchdog before and after, or not at
+  all.
+* With nothing on the bus to acknowledge, the frame is sent again and
+  again: 41 times in the 55 ms the first loop takes on a unit.  The
+  second loop is 57 ms of silence.  That is 112 ms a record with the
+  strobe left alone, and the watchdog's limit is 105 to 115 ms.  With
+  an adapter on the bus the frame is acknowledged the first time, after
+  1.4 ms.
+* Of four starts on the capture, two ended in the first record, 55 to
+  112 ms after the hand-over.  The other two ended at the same place
+  2.195 s in: the eighteenth record, step 10 of `board_init`, the last
+  one before the tick takes the strobe over.  Why those two got through
+  seventeen records before that is not known.
+
+So a wait for an acknowledgement is a wait the watchdog has to be fed
+through, and a program must not take as long over a bus with nobody on
+it as over one with somebody.  `can_tell` (`src/hw193.c`) is that
+function once, for all of them: the strobe is fed within its waits
+(the caller passes what feeds it), the cancel gets the time of two
+frames, and after one frame that nobody took the next ones wait some
+20 ms and no longer, until one is acknowledged again.  By the unit's
+loop times a start that took eighteen records and two seconds alone
+should take about half a second, with the strobe fed all the way.
+
+The programs build and the emulator's tests pass with it.  It has not
+yet run on a unit: the proof is a disc with the new loader that starts
+with no adapter on the bus.
+
+The emulator did not catch this and still would not: the same loader
+under `--strict --can-alone` has a longest pause on the strobe of
+16 ms where the unit has 112, because a round of such a loop takes
+139 ns on the unit and about a seventh of that in the emulator, which
+counts an instruction as a cycle and a register of the controller as
+no slower than memory.
 
 ## What this does and does not establish
 
