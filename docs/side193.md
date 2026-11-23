@@ -11,11 +11,10 @@ removes it.
 
 **State: it works in the emulator (test
 `side193_runs_beside_the_stock_software`) and it has run on a bench
-unit once, where it started and answered, with two faults: the stock
+unit, where it started and answered, with two faults: the stock
 software's interface stopped answering keys some minutes later (the
-stock software's own doing, see "The heap under the loader's place"),
-and every second frame of an answer of several frames was lost (see
-"On a unit").  Neither is fixed.**
+cause on the unit is not known), and every second frame of an answer
+of several frames was lost (see "On a unit").  Neither is fixed.**
 This page keeps what has been measured apart from what is assumed.
 
 ## Using it
@@ -84,6 +83,11 @@ repository).
   stayed dead, while the stock software's CAN frames went on.  A power
   cycle is the way out; the disc comes out in the time before the stock
   software calls it.
+* A later read-only run of `tools/bench193/sideheap.script` completed
+  872 values in 231 s, with no refused or lost request and no frame
+  given up.  Its findings are below.  Which screens were used during
+  its timed waits, and whether the interface stopped again, were not
+  recorded in the log.
 
 ## How it is hooked in
 
@@ -157,23 +161,67 @@ resident at all.
   NAV the log has `malloc error MEMADR:a9e836fc, TSKID:54, CALLADR:f5`
   ten times and more, and from then on no key changes the screen.  A
   run of the same keys without the update has none of those lines.
-* Whether the bench unit's dead interface was this has not been
-  checked on the unit (its build differs), but it fits: dead with the
-  resident switched off, the stock software otherwise running.
+* The corresponding header was **not** at 0x09e836f0 on bench unit B
+  during a later 231 s run.  That range retained its apparent power-up
+  contents.  The unit may put its picture heap elsewhere or build it
+  only after other screens are used.  The emulator's allocation
+  failure therefore does not establish the cause of the unit's dead
+  interface.
 
 So a program that returns must not let the application copy it over
-that heap.
+RAM the stock software may still use.  Relocation removes that entire
+overwrite even if the damaged object on the unit is not this heap.
+
+### Read-only measurements on the unit
+
+The copy and heap findings above began with the emulated V57510AA
+build.  Bench unit B runs V57510A0.  A read-only run on 2026-11-22 used
+the version 1 disc to compare the builds and sample candidate RAM.
+The result files are `work/side193/sideheap-unit.out` and
+`work/side193/sideheap-emu.out` (not in the repository).
+
+The run can be repeated without changing memory.  The host tool asks
+again for each value missing from a row:
+
+    python3 -I tools/bench193.py run DEVICE tools/bench193/sideheap.script OUT --ignition
+
+The results were:
+
+* All 104 words at 0x01c0a0e0-0x01c0a27f were identical in V57510A0
+  and V57510AA.  This includes the reads of LDM header words 0x70 and
+  0x74 and the routine that copies the module and calls its entries.
+* The copied LDM header was identical on the unit and emulator.  Its
+  load address was 0x09b60000 and its length 0x002da378.  The last
+  copied word at 0x09e3a374 was zero; 0x09e3a378 and the words after it
+  retained each machine's prior RAM contents.
+* The 32 words around 0x09e836f0 retained apparent power-up contents on
+  the unit and were identical at the beginning and end.  They were not
+  the heap header and 0x7c1f picture data from the earlier emulator run
+  in which the disc was inserted after the interface came up.
+* All 192 sampled words were identical across three passes.  Of those,
+  64 were four words every 4 KiB through the proposed
+  0x0bfe0000-0x0bfeffff place.  The others sampled the rest of the
+  emulator's observed-unused ranges.  Their values looked like the
+  unit's power-up RAM pattern.  The log does not say which unit
+  functions were exercised during the waits.
+
+The sampling is sparse.  It lowers the risk of using 0x0bfe0000 on
+V57510A0 but does not establish that no unsampled byte changed or that
+another stock-software path can never use the region.  Keep the known
+interval before the stock hand-over as the way to eject the existing
+disc if the stock interface stops responding.
 
 ### The fix to build
 
 This needs a relocated, short module image.  Moving only the stack
-does not fix it: the application has already copied the module over
-the heap before either of the program's entries runs.  The current
-called piece already uses the application's stack for only four saved
-registers, and the resident switches to its own stack on every tick.
+does not fix it: the application has already copied the module into
+the old LDM range before either of the program's entries runs.  The
+current called piece already uses the application's stack for only
+four saved registers, and the resident switches to its own stack on
+every tick.
 
 The unused RAM measured above leaves room for the two parts without
-using the heap:
+using the old LDM range:
 
 * Link the short called piece at 0x0bfe0000, in the 64 KiB immediately
   below the resident.  Keep the resident at 0x8bff0000 (physical
@@ -191,6 +239,78 @@ using the heap:
   for its short call because that stack is outside both side193
   regions and is restored before the return.
 
+The intended packing and hand-off, in pseudocode, is:
+
+```
+SHORT_PHYS = 0x0bfe0000
+RESIDENT_P1 = 0x8bff0000
+
+payload = link_side193(LOAD = SHORT_PHYS,
+                       RES = RESIDENT_P1,
+                       SIZE = 0x10000)
+used = 0x80 + length(payload)
+
+require payload.mark == "SIDE"
+require payload.requested_load == SHORT_PHYS
+require used <= 0x10000
+require SHORT_PHYS + used <= physical(RESIDENT_P1)
+require every nonzero entry in payload is within
+        [SHORT_PHYS + 0x80, SHORT_PHYS + used)
+
+new_ldm = copy(stock_ldm_padded_allocation)
+zero new_ldm[0x80 .. length(new_ldm)]
+copy payload to new_ldm[0x80 .. used]
+new_ldm_header.load = SHORT_PHYS
+new_ldm_header.size = used
+new_ldm_header.checksum = sum_of_big_endian_words(
+    new_ldm[0x80 .. used], zero_pad_last_word = true)
+
+replace LDM in LOADING.KWI with new_ldm
+replace each standalone copy of the same stock LDM with new_ldm
+keep each directory entry's padded allocation unchanged
+```
+
+The application and the two side193 entries then do this:
+
+```
+stock application:
+    copy LDM[0 .. LDM.header.size] to LDM.header.load
+    call LDM.entry[0]
+    call LDM.entry[2]
+
+side193 first entry:
+    return without changing registers
+
+side193 third entry:
+    save r8, r9, r10 and pr on the application task's stack
+
+    if the resident mark, canary and tick-table entry say it is live:
+        restore the saved registers
+        return 0
+
+    copy the linked resident from the short image to RESIDENT_P1
+    write back each copied data-cache line
+    invalidate each corresponding instruction-cache line
+    clear the resident's bss, including its private stack
+    call side_init to save and replace the stock tick-table entry
+
+    restore the saved registers
+    return 0
+
+each tick through side_entry:
+    save the interrupted context
+    switch to side_stack + sizeof(side_stack) in the resident
+    call side_tick
+    restore the interrupted context
+    jump to the saved stock tick handler
+```
+
+The payload's unused words behind its `SIDE` mark can carry
+`requested_load`; they are zero in version 1.  Recognizing that mark
+keeps relocation an explicit side193 packing path.  The existing
+stock-loader address, length and way-back packing remain the default
+path in `rnse custom`.
+
 Before putting this on a unit, an emulator test must show that the old
 LDM range at 0x09b60000 is not replaced by the module, its heap block
 headers remain the same as a stock control run, NAV and RADIO still
@@ -198,7 +318,10 @@ answer after the return, and taking the disc out and putting it back
 does not make a second resident or change the stock tick handler saved
 by the first one.  The first hardware trial should then repeat
 `tools/bench193/side.script`, exercise NAV and RADIO, and keep physical
-display opening and disc ejection available.
+display opening and disc ejection available.  A relocated image may be
+handled differently by V57510A0 even if its copy routine matches, so
+the pre-handover eject interval remains the recovery path for that
+trial.
 
 ## The stock software's interrupts and CAN mailboxes (emulator)
 
@@ -222,11 +345,17 @@ display opening and disc ejection available.
   0x0aa09000-0x0ba00000, 0x0ba01000-0x0bcd6000, 0x0bcd8000-0x0c000000.
   A session with a navigation DVD, a card or sound may use more.  The
   resident is at the top of the last one (0x0bff0000, 64 KiB).
+* On bench unit B, four words every 4 KiB of
+  0x0bfe0000-0x0bfeffff retained the power-up pattern across three
+  passes in 231 s.  Sparse samples of the rest of the ranges above did
+  too.  The screens and peripherals used during the timed waits were
+  not recorded.
 
 ## Not done
 
-* The two faults of the unit run: the heap under the loader's place,
-  and the frames lost from answers of several frames.
+* The two faults of the unit run: the unknown object harmed by the LDM
+  copy, if that copy caused the interface lock-up, and the frames lost
+  from answers of several frames.
 * A way to bring a newer resident or a small program in over CAN:
   version 1 has none, so every change to it is a new disc.
 * The stock software's debug text (its `printf` is in the flash and

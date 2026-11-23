@@ -1,0 +1,195 @@
+# examples/side193 on a unit, reads only: is the stock software's copy
+# of a loader, and the heap it goes over, on this unit what the
+# emulator shows (docs/side193.md, "The heap under the loader's
+# place"), and is the RAM a short program would be put in left alone?
+# Run it against the emulator as well and compare the two results
+# (bench193.py diff): the code should be the same where the builds are,
+# the memory not.
+#
+# Rows of values are asked for a few at a time: version 1 of the
+# resident loses every second frame of a long answer on a unit, and the
+# tool asks again for each one that is missing.
+info 0
+info 1
+note the OS module's header and the application's (their builds)
+r32 80400200 24
+r32 01c00000 24
+note the application's routine that copies a loader and calls it (0x01c0a0e8-0x01c0a276 in V57510AA)
+r32 01c0a0e0 68
+note the loader's place: the module header and entries as they were copied
+r32 a9b60000 8
+r32 a9b60070 8
+note where the copy ends in the emulator (0x09e3a378 for the stock length)
+r32 a9e3a340 20
+# (With the interface up before the disc went in, the emulator had at
+# 0x09e836fc: ad010036 0012e620 a9fb1d1c a9d550dc 00000026, pictures'
+# pixels of 7c1f after it.  The emulator's own run of this script, with
+# the disc in from the start, comes before that heap is built and shows
+# none of it.)
+note the heap's block header the emulator has at 0x09e836f0, and what is around it
+r32 a9e836c0 20
+note pass 1: the RAM under the resident (0x0bfe0000-0x0bff0000), four words every 4 KiB
+r32 abfe0000 4
+r32 abfe1000 4
+r32 abfe2000 4
+r32 abfe3000 4
+r32 abfe4000 4
+r32 abfe5000 4
+r32 abfe6000 4
+r32 abfe7000 4
+r32 abfe8000 4
+r32 abfe9000 4
+r32 abfea000 4
+r32 abfeb000 4
+r32 abfec000 4
+r32 abfed000 4
+r32 abfee000 4
+r32 abfef000 4
+note pass 1: the rest of that stretch (0x0bcd8000-0x0bfe0000), four words every 128 KiB
+r32 abce0000 4
+r32 abd00000 4
+r32 abd20000 4
+r32 abd40000 4
+r32 abd60000 4
+r32 abd80000 4
+r32 abda0000 4
+r32 abdc0000 4
+r32 abde0000 4
+r32 abe00000 4
+r32 abe20000 4
+r32 abe40000 4
+r32 abe60000 4
+r32 abe80000 4
+r32 abea0000 4
+r32 abec0000 4
+r32 abee0000 4
+r32 abf00000 4
+r32 abf20000 4
+r32 abf40000 4
+r32 abf60000 4
+r32 abf80000 4
+r32 abfa0000 4
+r32 abfc0000 4
+note pass 1: the other stretches the emulator never wrote, a few places each
+r32 a8400000 4
+r32 a8c00000 4
+r32 a9400000 4
+r32 aab00000 4
+r32 ab200000 4
+r32 ab900000 4
+r32 aba80000 4
+r32 abc00000 4
+info 1
+# use the unit meanwhile: RADIO, SETUP, the knob (NAV last: it may be
+# what ends the interface)
+wait 60000
+note pass 2: the RAM under the resident (0x0bfe0000-0x0bff0000), four words every 4 KiB
+r32 abfe0000 4
+r32 abfe1000 4
+r32 abfe2000 4
+r32 abfe3000 4
+r32 abfe4000 4
+r32 abfe5000 4
+r32 abfe6000 4
+r32 abfe7000 4
+r32 abfe8000 4
+r32 abfe9000 4
+r32 abfea000 4
+r32 abfeb000 4
+r32 abfec000 4
+r32 abfed000 4
+r32 abfee000 4
+r32 abfef000 4
+note pass 2: the rest of that stretch (0x0bcd8000-0x0bfe0000), four words every 128 KiB
+r32 abce0000 4
+r32 abd00000 4
+r32 abd20000 4
+r32 abd40000 4
+r32 abd60000 4
+r32 abd80000 4
+r32 abda0000 4
+r32 abdc0000 4
+r32 abde0000 4
+r32 abe00000 4
+r32 abe20000 4
+r32 abe40000 4
+r32 abe60000 4
+r32 abe80000 4
+r32 abea0000 4
+r32 abec0000 4
+r32 abee0000 4
+r32 abf00000 4
+r32 abf20000 4
+r32 abf40000 4
+r32 abf60000 4
+r32 abf80000 4
+r32 abfa0000 4
+r32 abfc0000 4
+note pass 2: the other stretches the emulator never wrote, a few places each
+r32 a8400000 4
+r32 a8c00000 4
+r32 a9400000 4
+r32 aab00000 4
+r32 ab200000 4
+r32 ab900000 4
+r32 aba80000 4
+r32 abc00000 4
+info 1
+wait 120000
+note pass 3: the RAM under the resident (0x0bfe0000-0x0bff0000), four words every 4 KiB
+r32 abfe0000 4
+r32 abfe1000 4
+r32 abfe2000 4
+r32 abfe3000 4
+r32 abfe4000 4
+r32 abfe5000 4
+r32 abfe6000 4
+r32 abfe7000 4
+r32 abfe8000 4
+r32 abfe9000 4
+r32 abfea000 4
+r32 abfeb000 4
+r32 abfec000 4
+r32 abfed000 4
+r32 abfee000 4
+r32 abfef000 4
+note pass 3: the rest of that stretch (0x0bcd8000-0x0bfe0000), four words every 128 KiB
+r32 abce0000 4
+r32 abd00000 4
+r32 abd20000 4
+r32 abd40000 4
+r32 abd60000 4
+r32 abd80000 4
+r32 abda0000 4
+r32 abdc0000 4
+r32 abde0000 4
+r32 abe00000 4
+r32 abe20000 4
+r32 abe40000 4
+r32 abe60000 4
+r32 abe80000 4
+r32 abea0000 4
+r32 abec0000 4
+r32 abee0000 4
+r32 abf00000 4
+r32 abf20000 4
+r32 abf40000 4
+r32 abf60000 4
+r32 abf80000 4
+r32 abfa0000 4
+r32 abfc0000 4
+note pass 3: the other stretches the emulator never wrote, a few places each
+r32 a8400000 4
+r32 a8c00000 4
+r32 a9400000 4
+r32 aab00000 4
+r32 ab200000 4
+r32 ab900000 4
+r32 aba80000 4
+r32 abc00000 4
+note the heap header again
+r32 a9e836c0 20
+info 1
+info 5
+info 9
+info b
