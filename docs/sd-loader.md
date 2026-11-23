@@ -45,9 +45,13 @@ units in all, the loader disc in the drive and nothing else on the bus.
 On every one the installed software starts the loader and the loader a
 program from a card.
 
-On units: the 193's loader with index 0280 on a North American 193 with
-software 1054, alone on its bus.  The disc as this script makes it, the
-192 on other software than 0371, and every European unit: not yet.
+On units: the North American disc as this script makes it has started
+the loader on two North American 193s (one of them on software 1054,
+index 0270).  Before it, the 193's loader alone with index 0280 on that
+unit, with nothing else on its bus.  Not yet: a program from a card
+started from this disc on a unit, the 192 (on any software, and on
+other software than 0371 for the program from the disc), and every
+European unit.
 
 ## The 192's loader
 
