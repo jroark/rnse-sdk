@@ -2643,3 +2643,177 @@ fn side193_runs_beside_the_stock_software() {
         assert!(m.board.flash[from..to] == flash[from..to], "{}: the flash was written in {:#x}..{:#x}", name, from, to);
     }
 }
+
+/// Every stock update image in the directory `RNSE_DISCS` (firmware,
+/// never committed; the test passes without it).
+fn discs() -> Vec<(String, Vec<u8>)> {
+    let Some(dir) = std::env::var_os("RNSE_DISCS") else { return Vec::new() };
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).expect("RNSE_DISCS is not a directory") {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("iso")) {
+            out.push((p.file_name().unwrap().to_string_lossy().into_owned(), std::fs::read(&p).unwrap()));
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// The software of one image installed, another disc in the drive, and
+/// the installed software run until it is about to call that disc's
+/// loader; with nothing else on the CAN bus, as on a bench.  As
+/// `started_by_stock_software_with`, which has the reasons, but saying
+/// what went wrong instead of stopping the test.
+fn installed_software_starts(installed: &[u8], variant: &str, disc: &[u8]) -> Result<Machine, String> {
+    use rnse::board::Model;
+    let variants = fw::load_variants(installed).unwrap();
+    let v = variants.iter().find(|v| v.name == variant).unwrap();
+    let model = Model::for_variant(variant).unwrap();
+    let index = fw::IndexInfo::from_disc(installed, variant).unwrap();
+    let entry = fw::load_variants(disc).unwrap().iter().find(|x| x.name == variant).ok_or("the disc has nothing for it")?.module("LDM").unwrap().entries[0];
+    let apfm = v.module("APFM").map(|a| a.load_addr | 0x8000_0000..(a.load_addr | 0x8000_0000) + a.size);
+    let nominal = if model == Model::Rnse192 { 4 } else { 8 };
+    let mut last = String::new();
+    for ratio in [nominal, nominal + 1, nominal - 1] {
+        let mut m = Machine::for_model(model);
+        m.set_cpu_ratio(ratio);
+        m.echo_console = false;
+        m.scramble_ram();
+        m.cache_model();
+        m.install_boot_stub(variant);
+        m.install(v, &index);
+        m.atapi().load(disc.to_vec());
+        m.start_os(v).map_err(|e| e.to_string())?;
+        m.can().alone = true;
+        let ms = m.cycles_per_ms();
+        m.cpu.breakpoints.push(entry);
+        let mut stop = Stop::Budget;
+        for _ in 0..60 {
+            if stop != Stop::Budget {
+                break;
+            }
+            stop = m.run(1_000 * ms);
+        }
+        let collision = stop == Stop::Fault && m.cpu.fault.as_deref().is_some_and(|f| {
+            let spc = f.split("SPC=").nth(1).and_then(|t| u32::from_str_radix(&t[..8.min(t.len())], 16).ok());
+            f.contains("EXPEVT=0e0") && spc.zip(apfm.clone()).is_some_and(|(spc, range)| range.contains(&spc))
+        });
+        if stop == Stop::Breakpoint {
+            m.cpu.breakpoints.clear();
+            return Ok(m);
+        }
+        last = format!("at CPU ratio {}: {:?}, {:?}", ratio, stop, m.cpu.fault);
+        if !collision {
+            break;
+        }
+    }
+    Err(format!("the installed software did not start the loader ({})", last))
+}
+
+/// One loader disc for every unit an update image has software for,
+/// whatever software such a unit has (tools/build-universal-loader.sh,
+/// docs/sd-loader.md): each image of `RNSE_DISCS` is installed in turn,
+/// for each of its variants, and the loader disc made from the newest
+/// image with those variants put in the drive, its index 0990.  The
+/// installed software has to start the loader, alone on its bus, and
+/// the loader a program from a card.  On the 192 that card is read by
+/// the card processors' program taken from the disc wherever the
+/// installed software is not the one the driver's table is of.
+#[test]
+fn universal_loader_starts_on_every_version() {
+    use rnse::board::Model;
+    let images = discs();
+    if images.is_empty() {
+        return;
+    }
+    let sdk = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
+    let names = |image: &[u8]| fw::load_variants(image).unwrap().iter().map(|v| v.name.clone()).collect::<Vec<_>>();
+    // The loaders and a program for the card, built once.
+    for (unit, model) in [("192", Model::Rnse192), ("193", Model::Rnse193)] {
+        for example in [if unit == "192" { "sdboot" } else { "sdload193" }, "hello"] {
+            let Some((_, image)) = images.iter().find(|(_, i)| names(i).iter().any(|n| Model::for_variant(n) == Some(model))) else { continue };
+            if sdk_example(image, model, example).is_none() {
+                return; // no cross compiler
+            }
+        }
+    }
+    // The loader disc of a set of variants: from the last image that has
+    // them and, where a 192 is among them, the card processors' program
+    // the card driver knows (src/sd.c: its first two parts' lengths, at a
+    // multiple of 64 KiB in the operating system).
+    let known_program = |image: &[u8]| {
+        fw::load_variants(image).unwrap().iter().filter(|v| Model::for_variant(&v.name) == Some(Model::Rnse192)).all(|v| {
+            let os = &v.module("OSM").unwrap().data;
+            let word = |at: usize| os.get(at - 0xc100..at - 0xc100 + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
+            (0x100000..0x300000).step_by(0x10000).any(|p| word(p) == Some(1) && word(p + 4) == Some(0x3800) && word(p + 0x380c) == Some(2) && word(p + 0x3810) == Some(0x71bc))
+        })
+    };
+    let mut loader_discs: Vec<(Vec<String>, String, Vec<u8>)> = Vec::new();
+    for (file, image) in images.iter().rev() {
+        let set = names(image);
+        if loader_discs.iter().any(|(s, _, _)| *s == set) || !known_program(image) {
+            continue;
+        }
+        let mut disc = image.clone();
+        for name in &set {
+            let (unit, example) = if Model::for_variant(name) == Some(Model::Rnse192) { ("192", "sdboot") } else { ("193", "sdload193") };
+            let program = std::fs::read(sdk.join(format!("out/{}-{}.bin", example, unit))).unwrap();
+            disc = fw::custom_loader(&disc, name, &program).unwrap().0;
+            fw::set_disc_index(&mut disc, name, "0990").unwrap();
+        }
+        loader_discs.push((set, file.clone(), disc));
+    }
+    let cells: Vec<(&String, &Vec<u8>, String)> = images.iter().flat_map(|(file, image)| names(image).into_iter().map(move |n| (file, image, n))).collect();
+    let only = std::env::var("RNSE_ONLY").ok();
+    let run = |image: &Vec<u8>, name: &String| -> Result<String, String> {
+        let model = Model::for_variant(name).unwrap();
+        let (_, base, disc) = loader_discs.iter().find(|(s, _, _)| *s == names(image)).ok_or("no image with these variants has the card program the driver knows")?;
+        let mut m = installed_software_starts(image, name, disc)?;
+        let ms = m.cycles_per_ms();
+        let flash = m.board.flash.clone();
+        let unit = if model == Model::Rnse192 { "192" } else { "193" };
+        let hello = std::fs::read(sdk.join(format!("out/hello-{}.bin", unit))).unwrap();
+        let card = rnse::fat::card("LOADER", &[rnse::fat::Entry::file("RNSE.BIN", hello)], None).unwrap();
+        if !m.insert_card(0, rnse::dev::sdhi::Card::from_bytes(card).unwrap()) {
+            return Err("no slot for the card".into());
+        }
+        let banner = if unit == "192" { "rnse sdk: sdboot" } else { "rnse sdk: sdload193" };
+        let text = |m: &Machine| String::from_utf8_lossy(&m.console).into_owned();
+        let tail = |m: &Machine| { let t = text(m); t[t.len().saturating_sub(300)..].to_string() };
+        let mut pressed = false;
+        for second in 0..90 {
+            if m.run(1_000 * ms) != Stop::Budget {
+                return Err(format!("stopped after {} s in the loader: {:?}; {:?}", second, m.cpu.fault, tail(&m)));
+            }
+            if text(&m).contains("rnse sdk: hello") && text(&m).contains("tick 2") {
+                if m.board.flash != flash {
+                    return Err("something wrote to the flash".into());
+                }
+                return Ok(format!("loader of {} started, program from the card ran after {} s", base, second + 1));
+            }
+            // The 193's loader lists the card's programs and wants SELECT.
+            if unit == "193" && !pressed && text(&m).contains(banner) && second >= 6 {
+                m.panel_key("SELECT", true);
+                m.run(200 * ms);
+                m.panel_key("SELECT", false);
+                pressed = true;
+            }
+        }
+        Err(format!("{}the program from the card did not run: {:?}", if text(&m).contains(banner) { "the loader started; " } else { "no loader banner; " }, tail(&m)))
+    };
+    let mut failed = Vec::new();
+    for chunk in cells.chunks(6) {
+        let results: Vec<_> = std::thread::scope(|s| {
+            let handles: Vec<_> = chunk.iter().filter(|(f, _, n)| only.as_ref().is_none_or(|o| format!("{} {}", f, n).contains(o.as_str())))
+                .map(|(file, image, name)| (file, name, s.spawn(|| run(image, name)))).collect();
+            handles.into_iter().map(|(f, n, h)| (f, n, h.join().unwrap_or_else(|_| Err("the run panicked".into())))).collect()
+        });
+        for (file, name, r) in results {
+            match r {
+                Ok(what) => eprintln!("{} {}: {}", file, name, what),
+                Err(why) => { eprintln!("{} {}: FAILED: {}", file, name, why); failed.push(format!("{} {}", file, name)); }
+            }
+        }
+    }
+    assert!(failed.is_empty(), "the universal loader failed on: {:?}", failed);
+}

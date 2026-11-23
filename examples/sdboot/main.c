@@ -271,7 +271,10 @@ static int open_card(int slot, u8 *image)
     }
     for (i = 0; i < 4; i++)
         last[i] = sd_last[i];
-    if (r && r != -2)
+    /* (-2 from the two above: the unit's software is not the one whose
+     * running program they talk to.  sd_init then takes the program
+     * from the loader's disc.) */
+    if (r)
         r = sd_init(slot);
     record((u8)slot, (u32)r, 0);
     if (r && r != -2) {
@@ -287,7 +290,7 @@ static int open_card(int slot, u8 *image)
     if (!r)
         seen_empty[slot] = 0;
     if (r == -2) {
-        say("NEEDS V222 0371 INSTALLED SOFTWARE", 2);
+        say("OTHER SOFTWARE: NEEDS THE LOADER DISC IN THE DRIVE", 2);
         return r;
     }
     if (r)

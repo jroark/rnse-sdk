@@ -5,6 +5,15 @@ other repositories depend on"); releases are tagged.
 
 ## Not yet released
 
+- New `tools/build-universal-loader.sh`: one loader disc from a stock
+  update disc, for every variant on it and any software such a unit has
+  (index 0990; `docs/sd-loader.md`, "One disc for any unit").
+- `src/sd.c` (192): `sd_init` finds the card processors' program by its
+  header instead of at one address (the European 0815 of the last update
+  discs has it at 0x230000), and reads it from the operating system on
+  the disc in the drive when the unit's flash has another.  `sd_attach`
+  and `sd_restart` still answer -2 on other software; `examples/sdboot`
+  now goes on to `sd_init` then.
 - New `can_tell` (`include/rnse.h`, `src/hw193.c`; the 193): a frame
   through mailbox 1 of the controller as the software before left it,
   usable before `board_init`, with the watchdog fed while it waits and

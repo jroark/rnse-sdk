@@ -1,9 +1,60 @@
-# Persistent SD test loader (North American 192)
+# The SD loader
+
+## One disc for any unit
+
+    PATH="$PWD/tools/sh4-docker:$PATH" sh tools/build-universal-loader.sh /path/to/stock.iso
+
+makes `out/universal-loader/loader.iso` from a stock update disc: a copy
+with the SD loader in the update loader's place for **every** kind of
+unit the disc has software for, and the software index 0990 for each.
+Burn it as a disc image.
+
+- **Which units.**  A North American update disc has software for the
+  192 (V222) and the 193 (V575); a European one for the 192 (V220) and
+  the 193s (V574, VB48).  So two discs cover every unit, one from each.
+  On the 192s the loader is `examples/sdboot` (below), on the 193s
+  `examples/sdload193`.
+- **Whatever software the unit has.**  The installed software starts a
+  disc's loader when the disc's index is higher than its own in the
+  second and third digit, the first being the same; it also checks the
+  project code and that every module on the disc adds up, and nothing
+  about versions.  0990 is higher than any unit's whose index begins
+  with 0.  (One that began with X or Y would want that letter; none is
+  known, and `rnse` writes digits only.)
+- **Nothing is installed.**  The loader ends in a restart, so the unit
+  keeps its software and its index and takes the same disc again every
+  time.  A unit that is given a stock update afterwards has a higher
+  index than before and still a lower one than 0990.
+- **Cards on a 192.**  The card processors need a program, which the
+  card driver takes from the unit's flash where that holds the one it
+  knows (`src/sd.c`): the North American software 0367 and 0371 has it,
+  and the European 0815 of the last two update discs.  On any other
+  software the driver reads the same program from the operating system
+  on the loader's own disc, so the script wants a disc that has it: the
+  update discs with the indexes 0320/0350 or 0310/0340 (North America),
+  0310/0740 or 0300/0730 (Europe), and says so otherwise.  The loader's
+  disc then has to be in the drive when a card is started.
+- **Alone on a bench.**  The loaders wait for no acknowledgement on the
+  CAN bus (`docs/custom-firmware.md`, "A 193 alone on its bus").
+
+Checked in the emulator (`tests/emulated.rs`,
+`universal_loader_starts_on_every_version`, with `RNSE_DISCS` naming a
+directory of update disc images): seven North American and eight
+European images, each installed in turn for each of its variants, 38
+units in all, the loader disc in the drive and nothing else on the bus.
+On every one the installed software starts the loader and the loader a
+program from a card.
+
+On units: the 193's loader with index 0280 on a North American 193 with
+software 1054, alone on its bus.  The disc as this script makes it, the
+192 on other software than 0371, and every European unit: not yet.
+
+## The 192's loader
 
 This loader boots once from an update disc, waits for a card in either slot,
 loads `RNSE.BIN` from its FAT root directory, and returns directly to its
-waiting screen after the test. The disc stays in the drive. Installed flash
-must contain the V222 0371 DSP program understood by the SDK SD driver.
+waiting screen after the test. The disc stays in the drive. On other installed software than the card driver knows it takes the card
+processors' program from the disc (above).
 The stock firmware is involved only in the initial disc launch.
 
 Build from the isolated worktree:
