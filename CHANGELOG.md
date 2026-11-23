@@ -14,6 +14,11 @@ other repositories depend on"); releases are tagged.
   the disc in the drive when the unit's flash has another.  `sd_attach`
   and `sd_restart` still answer -2 on other software; `examples/sdboot`
   now goes on to `sd_init` then.
+- `src/sd.c` (192): looking for that program on the disc no longer
+  waits for a drive that is not ready (it waited up to eight seconds
+  each time a card was started on a unit or in a test with other
+  software and no disc, which made rnse-sdbridge's viewer miss its
+  frames).
 - New `can_tell` (`include/rnse.h`, `src/hw193.c`; the 193): a frame
   through mailbox 1 of the controller as the software before left it,
   usable before `board_init`, with the watchdog fed while it waits and

@@ -333,8 +333,21 @@ static int program_on_disc(void)
 {
     u32 kwi, size, n, i, j, k;
     u8 head[0x80];
+    static const u8 test_unit_ready[12] = { 0x00 };
+    static const u8 request_sense[12] = { 0x03, 0, 0, 0, 18 };
+    u8 sense[18];
     from_disc = 0;
-    if (cd_wait_ready(8000) || cd_find("LOADING.KWI", &kwi, &size))
+    /* Only a disc that can be read now: no waiting for one and no
+     * command that moves the drive, since a program without a disc (one
+     * from a card, or in flash) comes through here too, each time a
+     * card is started.  A drive that first wants to say that its disc
+     * has changed is asked once more. */
+    if (cd_command(test_unit_ready, 0, 0)) {
+        cd_command(request_sense, sense, sizeof sense);
+        if (cd_command(test_unit_ready, 0, 0))
+            return -1;
+    }
+    if (cd_find("LOADING.KWI", &kwi, &size))
         return -1;
     disc_failed = 0;
     disc_have = 0xffffffff;
