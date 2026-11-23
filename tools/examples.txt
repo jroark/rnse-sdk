@@ -16,6 +16,7 @@ keys 192 193
 modern 192
 pcmstream 192 193
 pcmtest 192 193
+pin 192 193
 player 192 193
 preflight 192 193
 probe 192 193
