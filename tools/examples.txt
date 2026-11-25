@@ -42,3 +42,5 @@ du193 193
 keys193 193
 mon193 193
 side193 193
+adp193 193
+adpclear193 193
