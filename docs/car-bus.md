@@ -107,3 +107,12 @@ battery-backed memory.  It writes only when the block's marks and sum
 are right and the channel is 255, and never to the flash; the copy
 there keeps the old value and would come back if the battery-backed
 memory were ever lost.
+
+`examples/flashchk193` is for a 193 whose boot ROM asks for a disc
+("Set Original CD-ROM"): the ROM starts the SD loader from its disc,
+and this program, sent over the bus, reads the module directory, adds
+every module up against the sum in its header and says which 64 KiB of
+the flash are erased (`tools/flashchk193.py LOG`).  Built with
+`EXTRA_CFLAGS=-DPAGES` it also sends the sum of each 4 KiB of the first
+module that is wrong, to compare with the disc's.  It writes nothing.
+Worth running after any update, before the unit is switched off.
