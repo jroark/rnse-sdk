@@ -20,6 +20,19 @@ LINE = re.compile(r'\b(?:rx|tx)\s+([0-9a-fA-F]{3})\s+\[(\d)\]((?:\s+[0-9a-fA-F]{
 CHANNELS = [64, 65, 1, 2, 66, 67, 69, 68, 70, 99, 98, 63, 123, 117, 112, 3, 7, 114, 115,
             118, 119, 97, 125, 129, 130, 135, 136, 137, 138, 139, 8, 16, 17, 5, 116, 111,
             10, 4, 18]
+# What the stock software calls each (its routines' own names; rnse's
+# docs/hardware-193.md, "The channels").
+NAMES = {1: "tirelen: tyre circumference, mm", 2: "tirelen: pulses per turn of the wheel",
+         3: "config", 4: "RvcActivation: rear view camera", 5: "vthreshold1: speed threshold",
+         7: "config2", 8: "(sound setting, 0-5; else read as 3)", 10: "", 16: "NoNavi",
+         17: "enabfunc2", 18: "StartUpScreen", 63: "secaccess", 64: "swchksum (test)",
+         65: "diskread (test)", 66: "self (test)", 67: "eject", 68: "tstimage (test)",
+         69: "dispmec (test)", 70: "displight", 97: "swupgrade", 98: "trgtowtch (test)",
+         99: "transmode: transport mode", 111: "(test)", 112: "sourcesw (test)",
+         114: "(test picture)", 115: "(test picture)", 116: "(test)", 117: "soundpos (test)",
+         118: "(test picture)", 119: "(test picture)", 123: "volume", 125: "settings (test)",
+         129: "cstkey", 130: "cstpwoff", 135: "cstent", 136: "cstdrvpos", 137: "cstansw",
+         138: "cstautored1", 139: "cstautoredrpt"}
 END = {0: "read only: nothing written",
        1: "channel 67 cleared and read back",
        2: "NOT written: the block was not as expected (marks, sum, or channel 67 not 255)",
@@ -59,7 +72,8 @@ def main():
     for i, ch in enumerate(CHANNELS):
         v = r.get((0xa2, i))
         text = "missing" if v is None else "%5d  0x%04x" % (v[0], v[0])
-        print("  channel %3d  %s%s" % (ch, text, "   <- 255: stock refuses CD EJECT" if ch == 67 and v and v[0] == 0xff else ""))
+        print("  channel %3d  %s  %s%s" % (ch, text, NAMES.get(ch, ""),
+              "   <- 255: stock refuses CD EJECT" if ch == 67 and v and v[0] == 0xff else ""))
     for b in (0, 1):
         v = r.get((0xa3, b))
         if v is None:
