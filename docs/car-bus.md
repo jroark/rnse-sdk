@@ -94,3 +94,25 @@ image in the emulator likewise delivered those requests to receive
 mailbox 31 without a setup reply. This supports a K-line route for the
 documented adaptation. A stock eject command over infotainment CAN
 remains unverified.
+
+The same channel is a lock as well: while it holds 255 the stock
+software refuses CD EJECT (it logs `CDS_Eject2`; rnse's
+`docs/hardware-193.md`, "Adaptation, and when the stock software
+ejects").  The values are in the battery-backed memory, and
+`examples/adp193` reads them from a unit over the bus, with the copies
+in the flash store (`tools/adp193.py LOG` prints them by channel).
+`examples/adpclear193` is the same program with one write: channel 67
+from 255 back to 0, and the block's sum, three words of the
+battery-backed memory.  It writes only when the block's marks and sum
+are right and the channel is 255, and never to the flash; the copy
+there keeps the old value and would come back if the battery-backed
+memory were ever lost.
+
+`examples/flashchk193` is for a 193 whose boot ROM asks for a disc
+("Set Original CD-ROM"): the ROM starts the SD loader from its disc,
+and this program, sent over the bus, reads the module directory, adds
+every module up against the sum in its header and says which 64 KiB of
+the flash are erased (`tools/flashchk193.py LOG`).  Built with
+`EXTRA_CFLAGS=-DPAGES` it also sends the sum of each 4 KiB of the first
+module that is wrong, to compare with the disc's.  It writes nothing.
+Worth running after any update, before the unit is switched off.

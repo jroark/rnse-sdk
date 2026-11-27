@@ -2367,6 +2367,160 @@ fn dump193_sends_a_memory_window() {
     assert_eq!(m.atapi().ejects, 0, "{}: moved the drive", name);
 }
 
+/// examples/adp193 reads the stock 193 software's adaptation block from
+/// the battery-backed memory and sends it on the CAN bus, writing
+/// nothing; examples/adpclear193 also puts channel 67 from 255 back to
+/// 0, with the block's sum, and writes nothing when the block is not as
+/// expected.  Each is started by the SD loader as RNSE.BIN.
+#[test]
+fn adp193_reads_and_adpclear193_clears_channel_67() {
+    use rnse::board::Model;
+    let image = match disc() { Some(i) => i, None => return };
+    for (example, ch67, clears) in [("adp193", 0x00ffu16, false), ("adpclear193", 0x00ff, true), ("adpclear193", 0x0001, false)] {
+        if sdk_example(&image, Model::Rnse193, example).is_none() { return }
+        let sdk = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
+        let program = std::fs::read(sdk.join(format!("out/{}-193.bin", example))).unwrap();
+        let card = rnse::fat::card("ADP", &[rnse::fat::Entry::file("RNSE.BIN", program)], None).unwrap();
+        let (mut m, name, _) = match started_by_stock_software(&image, Model::Rnse193, "sdload193") { Some(x) => x, None => return };
+        let name = format!("{} {} {:#x}", name, example, ch67);
+        let ms = m.cycles_per_ms();
+        // The block as a unit has it: marks, 39 values, their sum.
+        let mut block = vec![0u8; 0xac];
+        block[0..4].copy_from_slice(&0x1234_5678u32.to_be_bytes());
+        block[4..8].copy_from_slice(&0x0222_0004u32.to_be_bytes());
+        let mut values = [0u16; 39];
+        values[2] = 0x07d4;
+        values[3] = 0x002b;
+        values[5] = ch67;
+        values[21] = 0x0f00;
+        for (i, v) in values.iter().enumerate() {
+            block[0x0c + 2 * i..0x0e + 2 * i].copy_from_slice(&v.to_be_bytes());
+        }
+        let sum: u32 = values.iter().map(|&v| v as u32).sum();
+        block[8..12].copy_from_slice(&sum.to_be_bytes());
+        block[0xa8..0xac].copy_from_slice(&0xedcb_a987u32.to_be_bytes());
+        m.board.nvram[0x3de4..0x3de4 + 0xac].copy_from_slice(&block);
+        let nvram = m.board.nvram.clone();
+        let flash = m.board.flash.clone();
+        assert!(m.insert_card(0, rnse::dev::sdhi::Card::from_bytes(card).unwrap()));
+        for _ in 0..40 {
+            if m.can().tx.iter().any(|f| f.id == 0x7f8 && f.data[0] == 0x76 && f.data[1] >= 1) {
+                break;
+            }
+            assert_eq!(m.run(500 * ms), Stop::Budget, "{}: {:?}", name, m.cpu.fault);
+        }
+        // The program is done within the key press: it reports and
+        // restarts the unit (the 193's watchdog reset, Stop::Fault).
+        assert!(m.panel_key("SELECT", true));
+        let mut waited = 0;
+        while !m.can().tx.iter().any(|f| f.id == 0x7f8 && f.data[0] == 0xa5) {
+            match m.run(500 * ms) {
+                Stop::Budget => {}
+                Stop::Fault if m.cpu.fault.as_deref() == Some("reset requested") => {}
+                other => panic!("{}: {:?} {:?}", name, other, m.cpu.fault),
+            }
+            waited += 1;
+            assert!(waited < 80, "{}: no report: {:?}", name, m.cpu.fault);
+        }
+        let rec = |m: &mut Machine, test: u8, item: Option<u8>| m.can().tx.iter()
+            .find(|f| f.id == 0x7f8 && f.data[0] == test && item.is_none_or(|i| f.data[1] == i))
+            .map(|f| (f.data[1], u32::from_be_bytes([f.data[2], f.data[3], f.data[4], f.data[5]]), u16::from_be_bytes([f.data[6], f.data[7]])));
+        assert_eq!(rec(&mut m, 0xa0, Some(0)), Some((0, 0x1234_5678, 0x0004)), "{}: mark", name);
+        assert_eq!(rec(&mut m, 0xa1, Some(0)), Some((0, sum, 1)), "{}: stored sum", name);
+        assert_eq!(rec(&mut m, 0xa1, Some(1)), Some((1, sum, 0)), "{}: sum", name);
+        for (i, &v) in values.iter().enumerate() {
+            assert_eq!(rec(&mut m, 0xa2, Some(i as u8)), Some((i as u8, v as u32, 0)), "{}: value {}", name, i);
+        }
+        assert!(rec(&mut m, 0xa3, Some(0)).is_some() && rec(&mut m, 0xa3, Some(1)).is_some(), "{}: flash store", name);
+        let end = rec(&mut m, 0xa5, None).unwrap();
+        // Never the flash, never the drive.
+        assert!(m.board.flash == flash, "{}: wrote to the flash", name);
+        assert_eq!(m.atapi().ejects, 0, "{}: moved the drive", name);
+        if clears {
+            assert_eq!(end, (1, 1, (sum - 0xff) as u16), "{}: end", name);
+            let mut expected = nvram.clone();
+            expected[0x3dfa..0x3dfc].copy_from_slice(&[0, 0]);
+            expected[0x3dec..0x3df0].copy_from_slice(&(sum - 0xff).to_be_bytes());
+            assert!(m.board.nvram == expected, "{}: more or other than the three words written", name);
+        } else {
+            let status = if example == "adp193" { 0 } else { 2 };
+            assert_eq!(end, (status, (ch67 as u32) << 16 | 1, sum as u16), "{}: end", name);
+            assert!(m.board.nvram == nvram, "{}: wrote to the battery-backed memory", name);
+        }
+    }
+}
+
+/// examples/flashchk193 reports what is in the flash where the software
+/// should be: every installed module's sum matches its header, one
+/// changed byte of the OS shows as a wrong sum, and it writes nothing.
+#[test]
+fn flashchk193_adds_up_the_installed_modules() {
+    use rnse::board::Model;
+    let image = match disc() { Some(i) => i, None => return };
+    for damage in [false, true] {
+        if sdk_example(&image, Model::Rnse193, "flashchk193").is_none() { return }
+        let sdk = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
+        let program = std::fs::read(sdk.join("out/flashchk193-193.bin")).unwrap();
+        let card = rnse::fat::card("CHK", &[rnse::fat::Entry::file("RNSE.BIN", program)], None).unwrap();
+        let (mut m, name, _) = match started_by_stock_software(&image, Model::Rnse193, "sdload193") { Some(x) => x, None => return };
+        let ms = m.cycles_per_ms();
+        if damage {
+            m.board.flash[0x0050_0000] ^= 0x01;
+        }
+        let flash = m.board.flash.clone();
+        let nvram = m.board.nvram.clone();
+        assert!(m.insert_card(0, rnse::dev::sdhi::Card::from_bytes(card).unwrap()));
+        for _ in 0..40 {
+            if m.can().tx.iter().any(|f| f.id == 0x7f8 && f.data[0] == 0x76 && f.data[1] >= 1) {
+                break;
+            }
+            assert_eq!(m.run(500 * ms), Stop::Budget, "{}: {:?}", name, m.cpu.fault);
+        }
+        assert!(m.panel_key("SELECT", true));
+        let mut waited = 0;
+        while !m.can().tx.iter().any(|f| f.id == 0x7f8 && f.data[0] == 0xb8) {
+            match m.run(500 * ms) {
+                Stop::Budget => {}
+                Stop::Fault if m.cpu.fault.as_deref() == Some("reset requested") => {}
+                // restart(): the 193 lets its watchdog reset it.
+                Stop::Fault if m.cpu.fault.as_deref().is_some_and(|f| f.contains("stopped itself")) => break,
+                other => panic!("{}: {:?} {:?}", name, other, m.cpu.fault),
+            }
+            waited += 1;
+            assert!(waited < 240, "{}: no report: {:?}", name, m.cpu.fault);
+        }
+        let rec = |m: &mut Machine, test: u8, item: u8| m.can().tx.iter()
+            .find(|f| f.id == 0x7f8 && f.data[0] == test && f.data[1] == item)
+            .map(|f| (u32::from_be_bytes([f.data[2], f.data[3], f.data[4], f.data[5]]), u16::from_be_bytes([f.data[6], f.data[7]])));
+        let modules = rec(&mut m, 0xb8, 0).unwrap().0;
+        assert!(modules >= 5, "{}: {} modules", name, modules);
+        assert_eq!(rec(&mut m, 0xb1, 0), Some((0x0040_0200, 0x0f)), "{}: the OS's header", name);
+        for i in 0..modules as u8 {
+            assert_eq!(rec(&mut m, 0xb1, i).unwrap().1, 0x0f, "{}: module {} header", name, i);
+            let same = rec(&mut m, 0xb5, i).unwrap().0 == rec(&mut m, 0xb6, i).unwrap().0;
+            assert_eq!(same, !(damage && i == 0), "{}: module {} sum (damage {})", name, i, damage);
+        }
+        // The erased map: the directory's sector holds data, the last
+        // megabyte below the parameter blocks is not all data.
+        let mut map = [0u8; 128];
+        let mut seen = 0;
+        for f in m.can().tx.iter().filter(|f| f.id == 0x7f9 && f.data[0] == 1) {
+            let off = ((f.data[1] as usize) << 8) | f.data[2] as usize;
+            for k in 0..5 {
+                if off + k < 128 { map[off + k] = f.data[3 + k]; seen += 1; }
+            }
+        }
+        assert_eq!(seen, 128, "{}: the map is not whole", name);
+        for sector in 0..1024usize {
+            let erased = flash[sector << 16..(sector + 1) << 16].iter().all(|&b| b == 0xff);
+            assert_eq!(map[sector >> 3] & (0x80 >> (sector & 7)) != 0, erased, "{}: sector {}", name, sector);
+        }
+        assert!(m.board.flash == flash, "{}: wrote to the flash", name);
+        assert!(m.board.nvram[0x20..] == nvram[0x20..], "{}: wrote to the battery-backed memory", name);
+        assert_eq!(m.atapi().ejects, 0, "{}: moved the drive", name);
+    }
+}
+
 fn crc32(data: &[u8]) -> u32 {
     let mut c = 0xffff_ffffu32;
     for &b in data {
